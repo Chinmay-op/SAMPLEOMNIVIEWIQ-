@@ -200,15 +200,51 @@ DevC is the **integration fabric**. Without it there is no local demo stack, no 
 
 ---
 
-## Sprint 1 Day-1 slice (already on board)
+## OI Sprint 1 — ordered backlog (live on board)
 
-| Person | Start here | Why first |
-|--------|------------|-----------|
-| Dnyandev | OI-62 (+ OI-42) | Unlocks PdM path + contracts for others |
-| vibhanshuinfo | OI-23, OI-5, OI-8 | Schemas + electrical replay unlock edge demos |
-| Chinmay | OI-41 → OI-51 → OI-54 | Scaffold → MQTT → TSDB = runnable spine |
+**Total:** 15 Tasks · **~18.5 SP** · Sort board by **Priority** to match waves.
 
-**Next integration beat:** DevB bots + DevC injectors plug into Lead’s OI-50 scenarios and OI-56 MD rule.
+### Wave 1 — Start in parallel (Priority: Highest)
+
+| Person | Order | Key | SP | Work |
+|--------|------:|-----|---:|------|
+| Dnyandev | 1a | [OI-42](https://mightium.atlassian.net/browse/OI-42) | 1.0 | Layer3 architecture contracts |
+| Dnyandev | 1b | [OI-62](https://mightium.atlassian.net/browse/OI-62) | 2.0 | Promote notebook → PdM module |
+| vibhanshuinfo | 1 | [OI-23](https://mightium.atlassian.net/browse/OI-23) | 1.0 | Electrical schema + Modbus map |
+| vibhanshuinfo | 1 | [OI-5](https://mightium.atlassian.net/browse/OI-5) | 0.5 | Vibration schema |
+| vibhanshuinfo | 1 | [OI-6](https://mightium.atlassian.net/browse/OI-6) | 0.5 | Thermal schema |
+| vibhanshuinfo | 1 | [OI-7](https://mightium.atlassian.net/browse/OI-7) | 0.5 | Pressure schema |
+| Chinmay | 1 | [OI-41](https://mightium.atlassian.net/browse/OI-41) | 1.5 | Scaffold `src/` + docker-compose |
+
+### Wave 1b — Right after scaffold (Priority: High)
+
+| Person | Order | Key | SP | Work |
+|--------|------:|-----|---:|------|
+| Chinmay | 2 | [OI-51](https://mightium.atlassian.net/browse/OI-51) | 1.0 | MQTT topics + Mosquitto |
+| Chinmay | 3 | [OI-54](https://mightium.atlassian.net/browse/OI-54) | 1.5 | TimescaleDB hypertables |
+
+### Wave 2 — After schemas / MQTT exist (Priority: High)
+
+| Person | Order | Key | SP | Work |
+|--------|------:|-----|---:|------|
+| vibhanshuinfo | 2 | [OI-8](https://mightium.atlassian.net/browse/OI-8) | 1.5 | Electrical CSV replay bot |
+| Chinmay | 4 | [OI-12](https://mightium.atlassian.net/browse/OI-12) | 2.0 | CSV→MQTT electrical injector |
+
+### Wave 3 — Integration beat (Priority: Medium)
+
+| Person | Order | Key | SP | Work |
+|--------|------:|-----|---:|------|
+| Dnyandev | 3 | [OI-50](https://mightium.atlassian.net/browse/OI-50) | 2.0 | Scenario injector (MD / lazy-idle / leak) |
+| Dnyandev | 4 | [OI-56](https://mightium.atlassian.net/browse/OI-56) | 2.0 | Rolling 15‑min kVA + MD alert |
+
+### Tracking umbrellas (Priority: Low — close when children done)
+
+| Person | Key | SP |
+|--------|-----|---:|
+| Dnyandev | [OI-1](https://mightium.atlassian.net/browse/OI-1) | 0.5 |
+| vibhanshuinfo | [OI-2](https://mightium.atlassian.net/browse/OI-2) | 0.5 |
+
+**Hand-off rule:** Wave 2 needs Wave 1 schemas + MQTT. Wave 3 needs Wave 2 stream + Lead contracts.
 
 ---
 
