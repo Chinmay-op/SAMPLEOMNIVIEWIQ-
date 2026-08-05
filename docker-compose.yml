@@ -1,0 +1,61 @@
+# ============================================================================
+# OmniView IQ — Local POC Stack
+# ============================================================================
+# Starts Mosquitto (MQTT broker) + TimescaleDB (time-series Postgres).
+# Usage:
+#   cp .env.example .env   # edit passwords first
+#   docker-compose up -d
+# ============================================================================
+
+services:
+  # ── MQTT Broker ────────────────────────────────────────────────────────────
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: omniview-mosquitto
+    restart: unless-stopped
+    ports:
+      - "${MQTT_BROKER_PORT:-1883}:1883"   # MQTT
+      - "9001:9001"                         # WebSocket (optional)
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - omniview-net
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -W 3 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Time-Series Database ──────────────────────────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: omniview-tsdb
+    restart: unless-stopped
+    ports:
+      - "${TSDB_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${TSDB_DB:-omniview}
+      POSTGRES_USER: ${TSDB_USER:-omniview}
+      POSTGRES_PASSWORD: ${TSDB_PASSWORD:-changeme}
+    volumes:
+      - tsdb_data:/var/lib/postgresql/data
+    networks:
+      - omniview-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TSDB_USER:-omniview} -d ${TSDB_DB:-omniview}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ── Volumes ─────────────────────────────────────────────────────────────────
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  tsdb_data:
+
+# ── Network ─────────────────────────────────────────────────────────────────
+networks:
+  omniview-net:
+    driver: bridge
