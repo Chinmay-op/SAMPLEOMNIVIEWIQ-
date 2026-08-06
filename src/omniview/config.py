@@ -7,10 +7,11 @@ rather than calling ``os.getenv`` directly — single source of truth.
 
 Usage::
 
-    from omniview.config import MQTT_BROKER_HOST, TSDB_DSN
+    from omniview.config import MQTT_BROKER_HOST, TSDB_DSN, SITE_ID
 """
 
 import os
+import socket
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -22,6 +23,11 @@ load_dotenv(_ENV_PATH)
 # ── MQTT (Mosquitto) ────────────────────────────────────────────────────────
 MQTT_BROKER_HOST: str = os.getenv("MQTT_BROKER_HOST", "localhost")
 MQTT_BROKER_PORT: int = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+MQTT_CLIENT_ID: str = os.getenv(
+    "MQTT_CLIENT_ID", f"omniview-edge-{socket.gethostname()}"
+)
+MQTT_QOS: int = int(os.getenv("MQTT_QOS", "1"))  # 0=fire-forget, 1=at-least-once
+MQTT_KEEPALIVE: int = int(os.getenv("MQTT_KEEPALIVE", "60"))  # seconds
 
 # ── TimescaleDB ─────────────────────────────────────────────────────────────
 TSDB_HOST: str = os.getenv("TSDB_HOST", "localhost")
@@ -40,4 +46,5 @@ POLL_ELECTRICAL_INTERVAL: int = int(os.getenv("POLL_ELECTRICAL_INTERVAL", "15"))
 POLL_PHYSICAL_INTERVAL: int = int(os.getenv("POLL_PHYSICAL_INTERVAL", "60"))
 
 # ── Site parameters ─────────────────────────────────────────────────────────
+SITE_ID: str = os.getenv("SITE_ID", "pune-isbm")
 CONTRACTED_DEMAND_KVA: float = float(os.getenv("CONTRACTED_DEMAND_KVA", "500"))
