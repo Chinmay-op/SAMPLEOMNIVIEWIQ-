@@ -112,16 +112,31 @@ docker exec -it omniview-tsdb psql -U omniview -d omniview -c "SELECT version();
 
 ---
 
-## Day-1 Replay (Coming in OI-12)
+## Day-1 Replay (OI-12)
 
-Once the CSV → MQTT electrical injector is implemented, you'll be able to replay real transformer CSV data through the full pipeline:
+The CSV → MQTT electrical injector seeds the full pipeline without live Modbus hardware.
 
 ```bash
-# (Future — requires OI-8 replay bot + OI-12 injector)
+# Replay from a CSV file (real transformer data from DevB OI-8)
 python -m omniview.edge.injector --csv data/electrical_replay.csv
+
+# Use built-in synthetic data (no CSV needed — great for demo)
+python -m omniview.edge.injector --synthetic
+
+# Fast replay (5× speed) for quicker demos
+python -m omniview.edge.injector --synthetic --speed 5
+
+# Burst mode — no delay, bulk-seeds TSDB immediately
+python -m omniview.edge.injector --synthetic --burst --max 500
+
+# Target a specific node
+python -m omniview.edge.injector --synthetic --node isbm-01
+
+# Loop a CSV indefinitely for continuous operation
+python -m omniview.edge.injector --csv data/replay.csv --loop
 ```
 
-This will publish each row as a timestamped JSON payload to `omniview/pune-isbm/compressor-01/electrical` at the configured 15-second poll interval, feeding the TSDB and dashboard exactly as live Modbus data would.
+Each row is published as a timestamped JSON payload to `omniview/pune-isbm/{node}/electrical` at the configured 15-second poll interval, feeding the TSDB and dashboard exactly as live Modbus data would.
 
 ---
 

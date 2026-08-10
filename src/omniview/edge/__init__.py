@@ -15,11 +15,13 @@ Future modules (not yet scaffolded):
 * Offline buffer & backfill  (OI-53)
 """
 
+from omniview.edge.injector import ElectricalInjector
 from omniview.edge.mqtt_client import OmniViewMQTTClient
 from omniview.edge.node_registry import NODES, get_all_topics, get_node
 from omniview.edge.topics import SENSOR_TYPES, build_topic, parse_topic
 
 __all__ = [
+    "ElectricalInjector",
     "OmniViewMQTTClient",
     "NODES",
     "SENSOR_TYPES",

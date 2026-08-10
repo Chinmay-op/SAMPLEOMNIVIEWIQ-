@@ -40,6 +40,7 @@ TSDB_DSN: str = (
     f"postgresql://{TSDB_USER}:{TSDB_PASSWORD}"
     f"@{TSDB_HOST}:{TSDB_PORT}/{TSDB_DB}"
 )
+TSDB_CHUNK_INTERVAL: str = os.getenv("TSDB_CHUNK_INTERVAL", "7 days")
 
 # ── Polling intervals (seconds) ────────────────────────────────────────────
 POLL_ELECTRICAL_INTERVAL: int = int(os.getenv("POLL_ELECTRICAL_INTERVAL", "15"))
