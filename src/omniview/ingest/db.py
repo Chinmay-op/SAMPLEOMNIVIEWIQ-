@@ -255,7 +255,7 @@ def insert_reading(
                 INSERT INTO {tbl} (time, device_id, site_id, sensor_type,
                                    schema_version, data)
                 VALUES (:time, :device_id, :site_id, :sensor_type,
-                        :schema_version, :data::jsonb)
+                        :schema_version, CAST(:data AS jsonb))
                 ON CONFLICT (device_id, time) DO NOTHING
             """),
             {
@@ -327,7 +327,7 @@ def insert_readings_batch(
                     INSERT INTO {tbl} (time, device_id, site_id, sensor_type,
                                        schema_version, data)
                     VALUES (:time, :device_id, :site_id, :sensor_type,
-                            :schema_version, :data::jsonb)
+                            :schema_version, CAST(:data AS jsonb))
                     ON CONFLICT (device_id, time) DO NOTHING
                 """),
                 {
