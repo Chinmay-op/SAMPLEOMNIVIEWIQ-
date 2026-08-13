@@ -37,9 +37,23 @@ class TestOnSensorMessage:
         mock_insert.return_value = True
 
         payload = {
+            "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "schema_version": "1.0",
-            "data": {"kva": 450.5, "kw": 380.2, "pf": 0.85},
+            "sensor_type": "electrical_meter",
+            "data": {
+                "voltage_v_ln_avg": 239.5,
+                "voltage_v_ll_avg": 414.8,
+                "current_a_avg": 205.3,
+                "active_power_kw_total": 140.2,
+                "apparent_power_kva_total": 147.6,
+                "reactive_power_kvar_total": 45.8,
+                "power_factor_avg": 0.949,
+                "frequency_hz": 50.02,
+                "active_energy_kwh": 150042.5,
+                "apparent_energy_kvah": 157544.6,
+                "rolling_kva_15min": 148.1,
+                "md_proximity_percent": 29.6,
+            },
         }
 
         _on_sensor_message(
@@ -66,8 +80,23 @@ class TestOnSensorMessage:
         mock_insert.return_value = False  # ON CONFLICT → not inserted
 
         payload = {
+            "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "data": {"kva": 450.5, "kw": 380.2, "pf": 0.85},
+            "sensor_type": "electrical_meter",
+            "data": {
+                "voltage_v_ln_avg": 239.5,
+                "voltage_v_ll_avg": 414.8,
+                "current_a_avg": 205.3,
+                "active_power_kw_total": 140.2,
+                "apparent_power_kva_total": 147.6,
+                "reactive_power_kvar_total": 45.8,
+                "power_factor_avg": 0.949,
+                "frequency_hz": 50.02,
+                "active_energy_kwh": 150042.5,
+                "apparent_energy_kvah": 157544.6,
+                "rolling_kva_15min": 148.1,
+                "md_proximity_percent": 29.6,
+            },
         }
 
         _on_sensor_message(
@@ -107,14 +136,16 @@ class TestOnSensorMessage:
         stats = get_stats()
         assert stats["skipped_system"] == 1
 
+    @patch("omniview.ingest.subscriber.validate_payload")
     @patch("omniview.ingest.subscriber.insert_reading")
     def test_missing_timestamp_uses_arrival_time(
-        self, mock_insert: MagicMock
+        self, mock_insert: MagicMock, mock_validate: MagicMock
     ) -> None:
         """Payloads without 'timestamp' should use UTC now as fallback."""
         from omniview.ingest.subscriber import _on_sensor_message
 
         mock_insert.return_value = True
+        mock_validate.return_value = True
 
         payload = {"data": {"temperature_c": 65.2}}  # no timestamp
 
@@ -126,12 +157,14 @@ class TestOnSensorMessage:
         ts = mock_insert.call_args.kwargs["time"]
         assert ts.tzinfo is not None  # must be timezone-aware
 
+    @patch("omniview.ingest.subscriber.validate_payload")
     @patch("omniview.ingest.subscriber.insert_reading")
-    def test_unix_timestamp_parsed(self, mock_insert: MagicMock) -> None:
+    def test_unix_timestamp_parsed(self, mock_insert: MagicMock, mock_validate: MagicMock) -> None:
         """Numeric timestamps (Unix epoch) should be parsed correctly."""
         from omniview.ingest.subscriber import _on_sensor_message
 
         mock_insert.return_value = True
+        mock_validate.return_value = True
 
         # 2026-08-10T12:00:00Z as Unix timestamp
         payload = {
@@ -158,8 +191,23 @@ class TestOnSensorMessage:
         mock_insert.side_effect = RuntimeError("DB connection lost")
 
         payload = {
+            "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "data": {"kva": 450.5, "kw": 380.2, "pf": 0.85},
+            "sensor_type": "electrical_meter",
+            "data": {
+                "voltage_v_ln_avg": 239.5,
+                "voltage_v_ll_avg": 414.8,
+                "current_a_avg": 205.3,
+                "active_power_kw_total": 140.2,
+                "apparent_power_kva_total": 147.6,
+                "reactive_power_kvar_total": 45.8,
+                "power_factor_avg": 0.949,
+                "frequency_hz": 50.02,
+                "active_energy_kwh": 150042.5,
+                "apparent_energy_kvah": 157544.6,
+                "rolling_kva_15min": 148.1,
+                "md_proximity_percent": 29.6,
+            },
         }
 
         # Should NOT raise
@@ -171,20 +219,23 @@ class TestOnSensorMessage:
         assert stats["errors"] == 1
         assert stats["inserted"] == 0
 
+    @patch("omniview.ingest.subscriber.validate_payload")
     @patch("omniview.ingest.subscriber.insert_reading")
     def test_payload_without_data_key_uses_full_payload(
-        self, mock_insert: MagicMock
+        self, mock_insert: MagicMock, mock_validate: MagicMock
     ) -> None:
         """If no 'data' key, the entire payload is stored as data."""
         from omniview.ingest.subscriber import _on_sensor_message
 
         mock_insert.return_value = True
+        mock_validate.return_value = True
 
         payload = {
+            "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "kva": 450.5,
-            "kw": 380.2,
-            "pf": 0.85,
+            "sensor_type": "electrical_meter",
+            "apparent_power_kva_total": 147.6,
+            "active_power_kw_total": 140.2,
         }
 
         _on_sensor_message(
@@ -200,10 +251,11 @@ class TestOnSensorMessage:
         """Payloads that fail schema validation should be skipped."""
         from omniview.ingest.subscriber import _on_sensor_message, get_stats
 
-        # Payload missing 'kw' and 'pf'
         payload = {
+            "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "data": {"kva": 450.5},
+            "sensor_type": "electrical_meter",
+            "data": {"apparent_power_kva_total": 147.6},
         }
 
         _on_sensor_message(

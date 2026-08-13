@@ -143,7 +143,7 @@ def _on_sensor_message(topic: str, payload: dict[str, Any]) -> None:
     schema_version = str(payload.get("schema_version", "1.0"))
 
     # -- Validate Payload -----------------------------------------------------
-    if not validate_payload(parsed.sensor_type, schema_version, data):
+    if not validate_payload(parsed.sensor_type, schema_version, payload):
         with _stats_lock:
             _stats["validation_failures"] += 1
         # Skip invalid payloads

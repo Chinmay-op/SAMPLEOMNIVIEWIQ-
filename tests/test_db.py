@@ -128,7 +128,20 @@ class TestInsertReading:
             device_id="compressor-01",
             site_id="pune-isbm",
             time=datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc),
-            data={"kva": 450.5, "kw": 380.2},
+            data={
+                "voltage_v_ln_avg": 239.5,
+                "voltage_v_ll_avg": 414.8,
+                "current_a_avg": 205.3,
+                "active_power_kw_total": 140.2,
+                "apparent_power_kva_total": 147.6,
+                "reactive_power_kvar_total": 45.8,
+                "power_factor_avg": 0.949,
+                "frequency_hz": 50.02,
+                "active_energy_kwh": 150042.5,
+                "apparent_energy_kvah": 157544.6,
+                "rolling_kva_15min": 148.1,
+                "md_proximity_percent": 29.6,
+            },
         )
         assert result is True
 
@@ -153,7 +166,20 @@ class TestInsertReading:
             device_id="compressor-01",
             site_id="pune-isbm",
             time=datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc),
-            data={"kva": 450.5, "kw": 380.2},
+            data={
+                "voltage_v_ln_avg": 239.5,
+                "voltage_v_ll_avg": 414.8,
+                "current_a_avg": 205.3,
+                "active_power_kw_total": 140.2,
+                "apparent_power_kva_total": 147.6,
+                "reactive_power_kvar_total": 45.8,
+                "power_factor_avg": 0.949,
+                "frequency_hz": 50.02,
+                "active_energy_kwh": 150042.5,
+                "apparent_energy_kvah": 157544.6,
+                "rolling_kva_15min": 148.1,
+                "md_proximity_percent": 29.6,
+            },
         )
         assert result is False
 
@@ -201,7 +227,20 @@ class TestInsertReadingsBatch:
                 "device_id": "compressor-01",
                 "site_id": "pune-isbm",
                 "time": datetime(2026, 8, 10, 12, 0, i, tzinfo=timezone.utc),
-                "data": {"kva": 400 + i},
+                "data": {
+                    "voltage_v_ln_avg": 239.5,
+                    "voltage_v_ll_avg": 414.8,
+                    "current_a_avg": 205.3,
+                    "active_power_kw_total": 140.2,
+                    "apparent_power_kva_total": 147.6 + i,
+                    "reactive_power_kvar_total": 45.8,
+                    "power_factor_avg": 0.949,
+                    "frequency_hz": 50.02,
+                    "active_energy_kwh": 150042.5,
+                    "apparent_energy_kvah": 157544.6,
+                    "rolling_kva_15min": 148.1,
+                    "md_proximity_percent": 29.6,
+                },
             }
             for i in range(3)
         ]
