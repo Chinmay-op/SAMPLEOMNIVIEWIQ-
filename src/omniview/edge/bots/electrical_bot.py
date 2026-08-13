@@ -115,11 +115,14 @@ def map_csv_row_to_payload(row):
     return payload
 
 
+from omniview.edge.mqtt_client import OmniViewMQTTClient
+from omniview.edge.topics import build_topic
+
 def run_bot():
     csv_path = os.environ.get("ELECTRICAL_CSV_PATH", "data/AV11.csv")
     csv_file = Path(csv_path)
 
-    print(f"Starting Electrical Publisher... (Polling 15s interval)")
+    print(f"Starting Electrical Publisher... (Polling {POLL_INTERVAL}s interval)")
     if csv_file.exists():
         print(f"Mode: CSV Replay ({csv_file})")
     else:
@@ -128,26 +131,30 @@ def run_bot():
     if not HAS_JSONSCHEMA:
         print("Warning: 'jsonschema' package not installed. Strict payload validation is disabled.")
     
+    topic = build_topic("pune-isbm", "compressor-01", "electrical")
     iterations = 0
     
-    while True:
-        # Loop to restart CSV when EOF is reached
-        if csv_file.exists():
-            with open(csv_file, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    payload = map_csv_row_to_payload(row)
-                    validate_payload(payload)
-                    print(json.dumps(payload))
-                    time.sleep(POLL_INTERVAL) # Pulse every 15s
-        else:
-            # Fallback Synthetic mode
-            is_anomaly = (iterations % 20 == 0) and iterations > 0
-            payload = generate_reading(is_anomaly)
-            validate_payload(payload)
-            print(json.dumps(payload))
-            iterations += 1
-            time.sleep(POLL_INTERVAL)
+    with OmniViewMQTTClient() as client:
+        while True:
+            # Loop to restart CSV when EOF is reached
+            if csv_file.exists():
+                with open(csv_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        payload = map_csv_row_to_payload(row)
+                        validate_payload(payload)
+                        client.publish(topic, payload)
+                        print(f"[electrical_bot] Published to {topic} -> {json.dumps(payload)}")
+                        time.sleep(POLL_INTERVAL) # Pulse every 15s
+            else:
+                # Fallback Synthetic mode
+                is_anomaly = (iterations % 20 == 0) and iterations > 0
+                payload = generate_reading(is_anomaly)
+                validate_payload(payload)
+                client.publish(topic, payload)
+                print(f"[electrical_bot] Published to {topic} -> {json.dumps(payload)}")
+                iterations += 1
+                time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
     run_bot()

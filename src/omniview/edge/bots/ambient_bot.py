@@ -61,17 +61,23 @@ def generate_reading() -> dict:
     return payload
 
 
+from omniview.edge.mqtt_client import OmniViewMQTTClient
+from omniview.edge.topics import build_topic
+
 def run_bot():
     print(f"Starting Ambient Weather Bot... (Polling {POLL_INTERVAL}s interval)")
     if not HAS_JSONSCHEMA:
         print("Warning: 'jsonschema' package not installed. Strict payload validation is disabled.")
     
-    while True:
-        payload = generate_reading()
-        validate_payload(payload)
-        print(json.dumps(payload))
-        
-        time.sleep(POLL_INTERVAL)
+    topic = build_topic("pune-isbm", "floor", "ambient")
+    with OmniViewMQTTClient() as client:
+        while True:
+            payload = generate_reading()
+            validate_payload(payload)
+            client.publish(topic, payload)
+            print(f"[ambient_bot] Published to {topic} -> {json.dumps(payload)}")
+            
+            time.sleep(POLL_INTERVAL)
 
 
 if __name__ == "__main__":

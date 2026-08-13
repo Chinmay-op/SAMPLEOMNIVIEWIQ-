@@ -88,6 +88,9 @@ def generate_reading(is_anomaly: bool = False) -> dict:
     }
     return payload
 
+from omniview.edge.mqtt_client import OmniViewMQTTClient
+from omniview.edge.topics import build_topic
+
 def run_bot():
     global state_cycle, current_pv
     print(f"Starting Thermal Synthetic Data Bot... (Polling {POLL_INTERVAL}s interval)")
@@ -98,23 +101,26 @@ def run_bot():
     current_pv = 25.0
     state_cycle = "HEATING"
     
+    topic = build_topic("pune-isbm", "compressor-01", "thermal")
     iterations = 0
-    while True:
-        # Occasionally simulate idle
-        if iterations % 50 == 40:
-            state_cycle = "IDLE_HOT"
-        elif iterations % 50 == 0 and iterations > 0:
-            state_cycle = "HEATING"
-            current_pv = 150.0 # Reheat from idle
+    with OmniViewMQTTClient() as client:
+        while True:
+            # Occasionally simulate idle
+            if iterations % 50 == 40:
+                state_cycle = "IDLE_HOT"
+            elif iterations % 50 == 0 and iterations > 0:
+                state_cycle = "HEATING"
+                current_pv = 150.0 # Reheat from idle
+                
+            is_anomaly = (iterations % 45 == 0) and iterations > 0
             
-        is_anomaly = (iterations % 45 == 0) and iterations > 0
-        
-        payload = generate_reading(is_anomaly)
-        validate_payload(payload)
-        print(json.dumps(payload))
-        
-        iterations += 1
-        time.sleep(POLL_INTERVAL)
+            payload = generate_reading(is_anomaly)
+            validate_payload(payload)
+            client.publish(topic, payload)
+            print(f"[thermal_bot] Published to {topic} -> {json.dumps(payload)}")
+            
+            iterations += 1
+            time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
     run_bot()

@@ -66,20 +66,26 @@ def generate_reading(is_anomaly: bool = False) -> dict:
     }
     return payload
 
+from omniview.edge.mqtt_client import OmniViewMQTTClient
+from omniview.edge.topics import build_topic
+
 def run_bot():
     print(f"Starting Gas & Particle Sensor Bot... (Polling {POLL_INTERVAL}s interval)")
     if not HAS_JSONSCHEMA:
         print("Warning: 'jsonschema' package not installed. Strict payload validation is disabled.")
     
+    topic = build_topic("pune-isbm", "compressor-01", "gas")
     iterations = 0
-    while True:
-        is_anomaly = (iterations % 40 == 0) and iterations > 0
-        payload = generate_reading(is_anomaly)
-        validate_payload(payload)
-        print(json.dumps(payload))
-        
-        iterations += 1
-        time.sleep(POLL_INTERVAL)
+    with OmniViewMQTTClient() as client:
+        while True:
+            is_anomaly = (iterations % 40 == 0) and iterations > 0
+            payload = generate_reading(is_anomaly)
+            validate_payload(payload)
+            client.publish(topic, payload)
+            print(f"[gas_bot] Published to {topic} -> {json.dumps(payload)}")
+            
+            iterations += 1
+            time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
     run_bot()
