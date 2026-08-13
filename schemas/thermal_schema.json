@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Thermal Sensor Payload (Omron E5CC Modbus PID)",
+  "type": "object",
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "description": "Unique identifier for the edge gateway or sensor node"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "NTP-synced timestamp of when the reading was taken"
+    },
+    "sensor_type": {
+      "type": "string",
+      "const": "thermal_probe"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "present_value_pv_c": { "type": "number", "description": "Actual temperature measured (PV) in Celsius" },
+        "set_point_sp_c": { "type": "number", "description": "Target temperature (SP) in Celsius" },
+        "manipulated_variable_mv_heat_percent": { "type": "number", "description": "Output duty cycle (MV) 0.0 to 100.0%" },
+        "heater_burnout_alarm_hb": { "type": "boolean", "description": "HB Alarm active (current dropped while MV is 100%)" },
+        "temperature_input_error": { "type": "boolean", "description": "True if thermocouple is disconnected/shorted" },
+        "temp_trend_15min": { "type": "string", "enum": ["STABLE", "RISING", "FALLING"], "description": "Categorical temperature trend" },
+        "machine_thermal_state": { "type": "string", "enum": ["HEATING", "AT_SETPOINT", "IDLE_HOT", "COOLING"], "description": "Cross-sensor inferred thermal state" }
+      },
+      "required": [
+        "present_value_pv_c",
+        "set_point_sp_c",
+        "manipulated_variable_mv_heat_percent",
+        "heater_burnout_alarm_hb",
+        "temperature_input_error",
+        "temp_trend_15min",
+        "machine_thermal_state"
+      ]
+    }
+  },
+  "required": ["device_id", "timestamp", "sensor_type", "data"]
+}

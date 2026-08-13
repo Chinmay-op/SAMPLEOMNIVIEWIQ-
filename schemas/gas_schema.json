@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Gas / Particle Overheating Sensor Payload (Schneider PowerLogic HeatTag)",
+  "type": "object",
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "description": "Unique identifier for the sensor node"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "NTP-synced timestamp of when the reading was taken"
+    },
+    "sensor_type": {
+      "type": "string",
+      "const": "gas_particle_sensor"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "gas_concentration_ppm": { "type": "number", "description": "Concentration of outgassing products from degrading insulation in PPM" },
+        "micro_particle_index": { "type": "number", "description": "Index representing sub-micron particles from overheating cable sheaths" },
+        "internal_panel_temp_c": { "type": "number", "description": "Ambient temperature inside the switchboard panel in Celsius" },
+        "rate_of_thermal_rise_c_per_min": { "type": "number", "description": "Rate of temperature increase in degrees C per minute" },
+        "alert_severity_level": { "type": "string", "enum": ["NORMAL", "WARNING", "ALARM", "CRITICAL"], "description": "HeatTag computed severity level based on gas/particle combinations" }
+      },
+      "required": [
+        "gas_concentration_ppm",
+        "micro_particle_index",
+        "internal_panel_temp_c",
+        "rate_of_thermal_rise_c_per_min",
+        "alert_severity_level"
+      ]
+    }
+  },
+  "required": ["device_id", "timestamp", "sensor_type", "data"]
+}

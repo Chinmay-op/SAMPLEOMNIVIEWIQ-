@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pneumatic Pressure Sensor Payload (Festo SPAU IO-Link)",
+  "type": "object",
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "description": "Unique identifier for the edge gateway or sensor node"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "NTP-synced timestamp of when the reading was taken"
+    },
+    "sensor_type": {
+      "type": "string",
+      "const": "pressure_transmitter"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "process_data_variable_raw": { "type": "integer", "description": "Raw 14-bit Process Data Variable (PDV) from IO-Link" },
+        "pressure_bar": { "type": "number", "description": "Scaled pressure value in bar" },
+        "switching_output_1_active": { "type": "boolean", "description": "Status of Binary Data Channel 1 (SP1 reached)" },
+        "switching_output_2_active": { "type": "boolean", "description": "Status of Binary Data Channel 2 (SP2 reached)" },
+        "device_status_code": { "type": "integer", "description": "IO-Link device status: 0=OK, 1=Maintenance, 3=Error, 4=Failure" },
+        "internal_temperature_c": { "type": "number", "description": "Sensor internal diagnostic temperature" },
+        "compressor_state": { "type": "string", "enum": ["LOADED", "UNLOADED", "OFF"], "description": "Edge-computed cross-sensor compressor load state" },
+        "pressure_trend_5min": { "type": "string", "enum": ["STABLE", "RISING", "FALLING"], "description": "Categorical pressure trend over 5 min" }
+      },
+      "required": [
+        "process_data_variable_raw",
+        "pressure_bar",
+        "switching_output_1_active",
+        "switching_output_2_active",
+        "device_status_code",
+        "internal_temperature_c",
+        "compressor_state",
+        "pressure_trend_5min"
+      ]
+    }
+  },
+  "required": ["device_id", "timestamp", "sensor_type", "data"]
+}

@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Electrical Sensor Payload (Selec MFM384)",
+  "type": "object",
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "description": "Unique identifier for the edge gateway or sensor node"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "NTP-synced timestamp of when the reading was taken"
+    },
+    "sensor_type": {
+      "type": "string",
+      "const": "electrical_meter"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "voltage_v_ln_avg": { "type": "number", "description": "Average Line-to-Neutral Voltage" },
+        "voltage_v_ll_avg": { "type": "number", "description": "Average Line-to-Line Voltage" },
+        "current_a_avg": { "type": "number", "description": "Average Phase Current" },
+        "active_power_kw_total": { "type": "number", "description": "Total Active Power in kW" },
+        "apparent_power_kva_total": { "type": "number", "description": "Total Apparent Power in kVA" },
+        "reactive_power_kvar_total": { "type": "number", "description": "Total Reactive Power in kVAR" },
+        "power_factor_avg": { "type": "number", "description": "Average Power Factor" },
+        "frequency_hz": { "type": "number", "description": "System Frequency in Hz" },
+        "active_energy_kwh": { "type": "number", "description": "Total Active Energy (Import) in kWh" },
+        "apparent_energy_kvah": { "type": "number", "description": "Total Apparent Energy in kVAh" },
+        "rolling_kva_15min": { "type": "number", "description": "15-minute rolling average of apparent power (edge-computed)" },
+        "md_proximity_percent": { "type": "number", "description": "Percentage of contracted MD limit (edge-computed)" }
+      },
+      "required": [
+        "voltage_v_ln_avg",
+        "voltage_v_ll_avg",
+        "current_a_avg",
+        "active_power_kw_total",
+        "apparent_power_kva_total",
+        "reactive_power_kvar_total",
+        "power_factor_avg",
+        "frequency_hz",
+        "active_energy_kwh",
+        "apparent_energy_kvah",
+        "rolling_kva_15min",
+        "md_proximity_percent"
+      ]
+    }
+  },
+  "required": ["device_id", "timestamp", "sensor_type", "data"]
+}

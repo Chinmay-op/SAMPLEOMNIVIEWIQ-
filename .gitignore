@@ -33,6 +33,11 @@ docker-compose.override.yml
 
 # ── Data (local CSVs, replay files — don't commit large datasets) ────────
 data/
+!data/AV11.csv
+
+# ── Generated sensor data (re-generate locally with synthetic_data/) ─────
+synthetic_data/output/*.parquet
+synthetic_data/output/*.csv
 
 # ── OS ───────────────────────────────────────────────────────────────────
 Thumbs.db
