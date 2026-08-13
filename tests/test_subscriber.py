@@ -67,7 +67,7 @@ class TestOnSensorMessage:
 
         payload = {
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "data": {"kva": 450.5},
+            "data": {"kva": 450.5, "kw": 380.2, "pf": 0.85},
         }
 
         _on_sensor_message(
@@ -159,7 +159,7 @@ class TestOnSensorMessage:
 
         payload = {
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "data": {"kva": 450.5},
+            "data": {"kva": 450.5, "kw": 380.2, "pf": 0.85},
         }
 
         # Should NOT raise
@@ -184,6 +184,7 @@ class TestOnSensorMessage:
             "timestamp": "2026-08-10T12:00:00+00:00",
             "kva": 450.5,
             "kw": 380.2,
+            "pf": 0.85,
         }
 
         _on_sensor_message(
@@ -193,3 +194,23 @@ class TestOnSensorMessage:
         stored_data = mock_insert.call_args.kwargs["data"]
         # Full payload is used as data (since no 'data' key)
         assert stored_data == payload
+
+    @patch("omniview.ingest.subscriber.insert_reading")
+    def test_invalid_payload_skipped(self, mock_insert: MagicMock) -> None:
+        """Payloads that fail schema validation should be skipped."""
+        from omniview.ingest.subscriber import _on_sensor_message, get_stats
+
+        # Payload missing 'kw' and 'pf'
+        payload = {
+            "timestamp": "2026-08-10T12:00:00+00:00",
+            "data": {"kva": 450.5},
+        }
+
+        _on_sensor_message(
+            "omniview/pune-isbm/compressor-01/electrical", payload
+        )
+
+        mock_insert.assert_not_called()
+        stats = get_stats()
+        assert stats["validation_failures"] == 1
+        assert stats["inserted"] == 0

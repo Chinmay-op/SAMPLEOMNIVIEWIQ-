@@ -99,6 +99,37 @@ Built a full CSV→MQTT replay injector with built-in synthetic data generation.
 
 ---
 
+## OI-14 — Payload Validation + Schema Versioning (1.0 SP)
+
+### What We Did
+Integrated a validation layer (`validation.py`) into the cloud ingest pipeline. The subscriber now checks incoming MQTT JSON payloads against standard JSON schemas using the `jsonschema` library before inserting them into TimescaleDB.
+
+### Decisions
+
+| # | Decision | Reasoning |
+|---|----------|-----------|
+| 1 | **Added `jsonschema` as a dependency** | Industry standard for JSON Schema validation. DevB is authoring standard JSON schemas (OI-23), so native schema validation is the cleanest approach. |
+| 2 | **Validation drops invalid payloads** | Rather than inserting them into a dead-letter table or flagging them as `is_valid=False`, we simply drop them and log a `validation_failures` metric. Keeps TSDB clean and simplifies the rule engine queries. |
+| 3 | **Bypass validation for undefined schemas** | While waiting for DevB to finalize schemas for all 7 sensor types, we only validate `electrical` (using a local placeholder). Other types return `True` by default, unblocking parallel dev without breaking the pipeline. |
+
+---
+
+## OI-28 — Gateway Offline Storage Buffer Implementation (2.0 SP)
+
+### What We Did
+Implemented FR7 from the PRD. Added an offline storage buffer (`offline_buffer.py`) using SQLite to cache telemetry locally on the edge gateway when the 4G network drops. Integrated this into `OmniViewMQTTClient` so that it intercepts publish calls during outages and chronologically replays the buffered messages in a background thread upon reconnection.
+
+### Decisions
+
+| # | Decision | Reasoning |
+|---|----------|-----------|
+| 1 | **Used SQLite over append files** | SQLite natively supports transactional safety (ACID) and chronological `ORDER BY` drains. It's built into Python, avoiding external dependencies, and handles process crashes gracefully. |
+| 2 | **Buffer is an Edge Layer responsibility** | The buffer lives in `src/omniview/edge/offline_buffer.py`. The cloud TSDB ingest logic (`subscriber.py`) doesn't need to know the buffer exists; it just receives chronological messages. |
+| 3 | **7-day / 100MB retention limit** | Prevents the gateway's flash storage from filling up. 7 days matches the TSDB chunk interval and is more than enough for a 3-week POC. |
+| 4 | **Drain batching with sleep delay** | Prevents flooding the Mosquitto broker on reconnect. Messages are drained in batches of 50 with a 0.1s pause between batches. |
+
+---
+
 ## Cross-Cutting Decisions (All Tasks)
 
 | Decision | Reasoning |

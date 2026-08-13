@@ -49,3 +49,12 @@ POLL_PHYSICAL_INTERVAL: int = int(os.getenv("POLL_PHYSICAL_INTERVAL", "60"))
 # ── Site parameters ─────────────────────────────────────────────────────────
 SITE_ID: str = os.getenv("SITE_ID", "pune-isbm")
 CONTRACTED_DEMAND_KVA: float = float(os.getenv("CONTRACTED_DEMAND_KVA", "500"))
+
+# ── Offline buffer (OI-28) ──────────────────────────────────────────────
+BUFFER_DB_PATH: str = os.getenv(
+    "BUFFER_DB_PATH",
+    str(Path(__file__).resolve().parents[2] / "data" / "offline_buffer.db"),
+)
+BUFFER_MAX_AGE_DAYS: int = int(os.getenv("BUFFER_MAX_AGE_DAYS", "7"))
+BUFFER_MAX_SIZE_MB: int = int(os.getenv("BUFFER_MAX_SIZE_MB", "100"))
+BUFFER_DRAIN_BATCH_SIZE: int = int(os.getenv("BUFFER_DRAIN_BATCH_SIZE", "50"))

@@ -40,12 +40,17 @@ from typing import Any, Callable
 import paho.mqtt.client as mqtt
 
 from omniview.config import (
+    BUFFER_DB_PATH,
+    BUFFER_DRAIN_BATCH_SIZE,
+    BUFFER_MAX_AGE_DAYS,
+    BUFFER_MAX_SIZE_MB,
     MQTT_BROKER_HOST,
     MQTT_BROKER_PORT,
     MQTT_CLIENT_ID,
     MQTT_KEEPALIVE,
     MQTT_QOS,
 )
+from omniview.edge.offline_buffer import OfflineBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +88,12 @@ class OmniViewMQTTClient:
         self._client_id = client_id or MQTT_CLIENT_ID
         self._qos = qos if qos is not None else MQTT_QOS
         self._keepalive = keepalive or MQTT_KEEPALIVE
+
+        # Offline buffer
+        self._buffer = OfflineBuffer(BUFFER_DB_PATH)
+        self._drain_batch_size = BUFFER_DRAIN_BATCH_SIZE
+        self._drain_thread: threading.Thread | None = None
+        self._stop_drain = threading.Event()
 
         # Callback registry: topic_filter -> list of callbacks
         self._subscriptions: dict[str, list[MessageCallback]] = {}
@@ -151,6 +162,10 @@ class OmniViewMQTTClient:
     def disconnect(self) -> None:
         """Gracefully disconnect from the MQTT broker."""
         logger.info("Disconnecting from MQTT broker")
+        self._stop_drain.set()
+        if self._drain_thread and self._drain_thread.is_alive():
+            self._drain_thread.join(timeout=2.0)
+            
         self._client.loop_stop()
         self._client.disconnect()
         self._connected.clear()
@@ -179,6 +194,8 @@ class OmniViewMQTTClient:
         retain: bool = False,
     ) -> None:
         """Publish a JSON payload to an MQTT topic.
+        
+        If disconnected, the message is buffered locally.
 
         Parameters
         ----------
@@ -190,17 +207,17 @@ class OmniViewMQTTClient:
             Override default QoS for this message.
         retain : bool
             Whether the broker should retain this message.
-
-        Raises
-        ------
-        RuntimeError
-            If not connected to the broker.
         """
         if not self._connected.is_set():
-            raise RuntimeError(
-                "Cannot publish: not connected to MQTT broker. "
-                "Call connect() first."
-            )
+            logger.info("MQTT disconnected. Buffering message for %s", topic)
+            self._buffer.store(topic, payload)
+            
+            # Maintenance: purge old messages if buffer gets too big
+            # (In a real system we'd check size, for POC we just purge by age occasionally)
+            if self._buffer.count() % 1000 == 0:
+                self._buffer.purge_expired(BUFFER_MAX_AGE_DAYS)
+                
+            return
 
         effective_qos = qos if qos is not None else self._qos
         message = json.dumps(payload, default=str)
@@ -253,6 +270,64 @@ class OmniViewMQTTClient:
                 topic,
             )
 
+    # ── Buffer Drain ────────────────────────────────────────────────────────
+
+    def _start_drain_thread(self) -> None:
+        """Start the background thread to drain the offline buffer."""
+        if self._drain_thread and self._drain_thread.is_alive():
+            return
+            
+        self._stop_drain.clear()
+        self._drain_thread = threading.Thread(
+            target=self._drain_loop, 
+            name="MQTT-Buffer-Drain", 
+            daemon=True
+        )
+        self._drain_thread.start()
+
+    def _drain_loop(self) -> None:
+        """Continuously drain the buffer while connected."""
+        logger.info("Started offline buffer drain loop")
+        
+        while self._connected.is_set() and not self._stop_drain.is_set():
+            count = self._buffer.count()
+            if count == 0:
+                # Buffer is empty, sleep and check again later
+                time.sleep(1.0)
+                continue
+                
+            logger.info("Draining %d messages from offline buffer", count)
+            
+            # Fetch a batch
+            messages = self._buffer.drain(self._drain_batch_size)
+            if not messages:
+                time.sleep(1.0)
+                continue
+                
+            # Publish batch
+            published_ids = []
+            for msg in messages:
+                if not self._connected.is_set() or self._stop_drain.is_set():
+                    break
+                    
+                message_str = json.dumps(msg.payload, default=str)
+                info = self._client.publish(msg.topic, message_str, qos=self._qos)
+                # Wait for publish to complete before acking
+                info.wait_for_publish(timeout=2.0)
+                if info.is_published():
+                    published_ids.append(msg.id)
+                else:
+                    logger.warning("Failed to publish buffered message ID %d", msg.id)
+                    break # Stop batch if publish fails
+            
+            # Ack successfully published messages
+            if published_ids:
+                self._buffer.ack(published_ids)
+                logger.debug("Acked %d buffered messages", len(published_ids))
+            
+            # Brief pause between batches to not flood the broker
+            time.sleep(0.1)
+
     # ── Paho callbacks (internal) ───────────────────────────────────────────
 
     def _on_connect(
@@ -273,6 +348,14 @@ class OmniViewMQTTClient:
             for topic in self._subscriptions:
                 client.subscribe(topic, qos=self._qos)
                 logger.info("Re-subscribed to %s on reconnect", topic)
+                
+            # Trigger buffer drain
+            if self._buffer.count() > 0:
+                logger.info(
+                    "Network connected. Buffer has %d messages to replay chronologically.", 
+                    self._buffer.count()
+                )
+                self._start_drain_thread()
         else:
             logger.error("MQTT connection failed: reason_code=%s", reason_code)
 

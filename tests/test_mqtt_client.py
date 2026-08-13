@@ -82,10 +82,22 @@ class TestPublish:
         call_kwargs = client._client.publish.call_args
         assert call_kwargs.kwargs["qos"] == 0
 
-    def test_publish_when_disconnected_raises(self):
-        client = OmniViewMQTTClient()
-        with pytest.raises(RuntimeError, match="not connected"):
+    def test_publish_when_disconnected_buffers(self, tmp_path):
+        from omniview.config import BUFFER_DB_PATH
+        
+        # Override buffer path to use tmp_path
+        with patch("omniview.edge.mqtt_client.BUFFER_DB_PATH", str(tmp_path / "test_buffer.db")):
+            client = OmniViewMQTTClient()
+            # Initial state is disconnected
+            assert client.is_connected is False
+            
             client.publish("test/topic", {"key": "value"})
+            
+            # Message should be stored in buffer
+            assert client._buffer.count() == 1
+            messages = client._buffer.drain(batch_size=1)
+            assert messages[0].topic == "test/topic"
+            assert messages[0].payload == {"key": "value"}
 
 
 class TestSubscribe:

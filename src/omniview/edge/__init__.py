@@ -18,10 +18,12 @@ Future modules (not yet scaffolded):
 from omniview.edge.injector import ElectricalInjector
 from omniview.edge.mqtt_client import OmniViewMQTTClient
 from omniview.edge.node_registry import NODES, get_all_topics, get_node
+from omniview.edge.offline_buffer import OfflineBuffer
 from omniview.edge.topics import SENSOR_TYPES, build_topic, parse_topic
 
 __all__ = [
     "ElectricalInjector",
+    "OfflineBuffer",
     "OmniViewMQTTClient",
     "NODES",
     "SENSOR_TYPES",

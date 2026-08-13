@@ -21,6 +21,7 @@ from omniview.ingest.db import (
     query_latest,
 )
 from omniview.ingest.migrations import run_migrations
+from omniview.ingest.validation import validate_payload
 
 __all__ = [
     "create_hypertables",
@@ -29,4 +30,5 @@ __all__ = [
     "insert_readings_batch",
     "query_latest",
     "run_migrations",
+    "validate_payload",
 ]

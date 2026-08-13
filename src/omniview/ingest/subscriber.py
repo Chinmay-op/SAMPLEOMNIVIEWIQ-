@@ -46,6 +46,7 @@ from omniview.edge.mqtt_client import OmniViewMQTTClient
 from omniview.edge.topics import SENSOR_TYPES, build_wildcard, parse_topic
 from omniview.ingest.db import insert_reading
 from omniview.ingest.migrations import run_migrations
+from omniview.ingest.validation import validate_payload
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ _stats = {
     "duplicates": 0,
     "errors": 0,
     "skipped_system": 0,
+    "validation_failures": 0,
 }
 _stats_lock = threading.Lock()
 
@@ -140,6 +142,13 @@ def _on_sensor_message(topic: str, payload: dict[str, Any]) -> None:
     data = payload.get("data", payload)
     schema_version = str(payload.get("schema_version", "1.0"))
 
+    # -- Validate Payload -----------------------------------------------------
+    if not validate_payload(parsed.sensor_type, schema_version, data):
+        with _stats_lock:
+            _stats["validation_failures"] += 1
+        # Skip invalid payloads
+        return
+
     # -- Insert into TimescaleDB ----------------------------------------------
     try:
         inserted = insert_reading(
@@ -202,12 +211,13 @@ def run_subscriber(site_id: str | None = None) -> None:
             stats = get_stats()
             logger.info(
                 "Subscriber stats: received=%d inserted=%d "
-                "duplicates=%d errors=%d skipped=%d",
+                "duplicates=%d errors=%d skipped=%d validation_failures=%d",
                 stats["received"],
                 stats["inserted"],
                 stats["duplicates"],
                 stats["errors"],
                 stats["skipped_system"],
+                stats["validation_failures"],
             )
 
     logger.info("Subscriber stopped. Final stats: %s", get_stats())

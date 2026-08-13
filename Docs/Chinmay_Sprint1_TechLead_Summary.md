@@ -187,8 +187,39 @@ HOW TO TEST:
   # Inserts 100 readings with no delay
 
 
+--------------------------------------------------------------
+5. OI-14 — PAYLOAD VALIDATION & SCHEMA VERSIONING (1.0 SP)
+--------------------------------------------------------------
+
+WHAT I DID:
+- Integrated `jsonschema` into the project to perform standard schema validation.
+- Built a new `validate_payload` module inside the `ingest` package.
+- Applied a placeholder schema for electrical readings while gracefully allowing un-configured sensors to pass through without blocking development.
+- Updated the TimescaleDB subscriber to evaluate payloads on-the-fly, dropping non-compliant entries and tracking them as `validation_failures`.
+- Added unit tests.
+
+HOW TO TEST:
+  pytest tests/test_validation.py -v
+
+
+--------------------------------------------------------------
+6. OI-28 — GATEWAY OFFLINE STORAGE BUFFER (2.0 SP)
+--------------------------------------------------------------
+
+WHAT I DID:
+- Implemented FR7 from the PRD: an offline storage buffer on the edge gateway.
+- Built a robust local storage buffer using Python's built-in `sqlite3`.
+- When the 4G cellular connection drops, the MQTT client intercepts published messages and writes them to a local SQLite database (`data/offline_buffer.db`).
+- Implemented a dedicated background `drain` thread that activates automatically the moment MQTT reconnects, replaying in exact chronological order.
+- Added retention limits in config: 7 days, 100MB, 50 messages per batch.
+- Verified buffer behavior in `test_mqtt_client.py` and `test_offline_buffer.py`.
+
+HOW TO TEST:
+  pytest tests/test_offline_buffer.py tests/test_mqtt_client.py -v
+
+
 ==============================================================
-  END-TO-END PIPELINE TEST (ALL 4 TASKS TOGETHER)
+  END-TO-END PIPELINE TEST (ALL 6 TASKS TOGETHER)
 ==============================================================
 
 This is the full Day-1 demo flow. Tests OI-41 + OI-51 + OI-54 + OI-12:
@@ -225,20 +256,20 @@ This is the full Day-1 demo flow. Tests OI-41 + OI-51 + OI-54 + OI-12:
   OVERALL STATUS
 ==============================================================
 
-Tasks Completed:  4/4 (OI-41, OI-51, OI-54, OI-12)
-Story Points:     6.0 SP
-Total Tests:      79 (all passing, 0 regressions)
-Files Changed:    ~28 (new + modified)
+Tasks Completed:  6/6 (OI-41, OI-51, OI-54, OI-12, OI-14, OI-28)
+Story Points:     9.0 SP
+Total Tests:      98 (all passing, 0 regressions)
+Files Changed:    ~40 (new + modified)
 Branch:           chinmay
 Key Commits:      d64cd65 (scaffold), + subsequent commits
 
 What's unblocked next:
-  - OI-55: Payload validation + Day-1 seed script
+  - OI-55: Day-1 seed script
   - OI-68: Live dashboard (data is now in TSDB)
-  - OI-56 (Dnyandev): Rolling 15-min kVA + MD alert rule (synthetic data ready)
+  - OI-29: MD breach prediction alert
 
 Blockers:
-  - DevB schemas (OI-23, OI-5/6/7) not yet delivered — using synthetic data
+  - DevB schemas (OI-23, OI-5/6/7) not yet delivered — using synthetic data (Tracked in DevB_Schema_Integration_Checklist.md)
   - Docker Desktop needed for integration tests (unit tests work without it)
 
 ==============================================================
