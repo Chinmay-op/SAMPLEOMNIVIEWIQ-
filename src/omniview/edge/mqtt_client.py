@@ -83,9 +83,10 @@ class OmniViewMQTTClient:
         qos: int | None = None,
         keepalive: int | None = None,
     ) -> None:
+        import uuid
         self._broker_host = broker_host or MQTT_BROKER_HOST
         self._broker_port = broker_port or MQTT_BROKER_PORT
-        self._client_id = client_id or MQTT_CLIENT_ID
+        self._client_id = client_id or f"{MQTT_CLIENT_ID}-{uuid.uuid4().hex[:8]}"
         self._qos = qos if qos is not None else MQTT_QOS
         self._keepalive = keepalive or MQTT_KEEPALIVE
 
