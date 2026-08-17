@@ -51,7 +51,18 @@ def generate_reading(is_anomaly: bool = False) -> dict:
         rate_of_rise = round(random.uniform(-0.1, 0.1), 2)
         
     severity = compute_severity(gas_ppm, micro_particles)
-        
+
+    # --- Humidity: rises with severity (thermal moisture release from insulation) ---
+    if severity in ["ALARM", "CRITICAL"]:
+        humidity = round(random.uniform(60.0, 82.0), 1)
+    elif severity == "WARNING":
+        humidity = round(random.uniform(50.0, 65.0), 1)
+    else:
+        humidity = round(random.uniform(38.0, 55.0), 1)
+
+    # --- AQI: weighted composite of gas + particles (0-10 scale) ---
+    aqi = min(10, int((gas_ppm / 10.0) + (micro_particles / 25.0)))
+
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
@@ -61,6 +72,8 @@ def generate_reading(is_anomaly: bool = False) -> dict:
             "micro_particle_index": micro_particles,
             "internal_panel_temp_c": internal_temp,
             "rate_of_thermal_rise_c_per_min": rate_of_rise,
+            "ambient_humidity_pct": humidity,
+            "air_quality_index": aqi,
             "alert_severity_level": severity
         }
     }

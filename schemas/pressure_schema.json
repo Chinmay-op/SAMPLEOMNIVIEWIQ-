@@ -21,6 +21,11 @@
       "properties": {
         "process_data_variable_raw": { "type": "integer", "description": "Raw 14-bit Process Data Variable (PDV) from IO-Link" },
         "pressure_bar": { "type": "number", "description": "Scaled pressure value in bar" },
+        "pressure_unit": { "type": "string", "description": "Unit of measurement" },
+        "pressure_min_memory_bar": { "type": "number", "description": "Historical minimum pressure registered" },
+        "pressure_max_memory_bar": { "type": "number", "description": "Historical maximum pressure registered" },
+        "teach_sp1_bar": { "type": "number", "description": "Configured switching point 1 threshold in bar" },
+        "teach_sp2_bar": { "type": "number", "description": "Configured switching point 2 threshold in bar" },
         "switching_output_1_active": { "type": "boolean", "description": "Status of Binary Data Channel 1 (SP1 reached)" },
         "switching_output_2_active": { "type": "boolean", "description": "Status of Binary Data Channel 2 (SP2 reached)" },
         "device_status_code": { "type": "integer", "description": "IO-Link device status: 0=OK, 1=Maintenance, 3=Error, 4=Failure" },
@@ -31,6 +36,11 @@
       "required": [
         "process_data_variable_raw",
         "pressure_bar",
+        "pressure_unit",
+        "pressure_min_memory_bar",
+        "pressure_max_memory_bar",
+        "teach_sp1_bar",
+        "teach_sp2_bar",
         "switching_output_1_active",
         "switching_output_2_active",
         "device_status_code",

@@ -42,7 +42,7 @@ def generate_reading(is_anomaly: bool = False) -> dict:
     error = False
 
     if is_anomaly:
-        state_cycle = "AT_SETPOINT" # Anomaly overrides normal state progression for this poll
+        state_cycle = "AT_SETPOINT"
         pv = round(random.uniform(275.5, 300.0), 1)
         mv = 100.0
         hb = True
@@ -50,7 +50,6 @@ def generate_reading(is_anomaly: bool = False) -> dict:
         state_str = "AT_SETPOINT"
     else:
         if state_cycle == "HEATING":
-            # Ramp up 4.5 C/min
             current_pv = min(255.0, current_pv + 4.5)
             pv = round(current_pv + random.uniform(-0.5, 0.5), 1)
             mv = round(random.uniform(85.0, 100.0), 1)
@@ -60,7 +59,6 @@ def generate_reading(is_anomaly: bool = False) -> dict:
                 state_cycle = "AT_SETPOINT"
                 
         elif state_cycle == "IDLE_HOT":
-            # Idle
             pv = round(random.uniform(240.0, 260.0), 1)
             mv = round(random.uniform(15.0, 35.0), 1)
             trend = random.choice(["STABLE", "FALLING"])
@@ -72,6 +70,20 @@ def generate_reading(is_anomaly: bool = False) -> dict:
             trend = "STABLE"
             state_str = "AT_SETPOINT"
 
+    # --- PID tuning constants (fixed for this barrel zone) ---
+    p_band = 5.0
+    i_time = 240
+    d_time = 60
+
+    # --- SSR failure: only fires when HB is active AND MV is maxed ---
+    ssr_fail = hb and mv >= 99.0
+
+    # --- Loop burnout: fires when PV is far from SP ---
+    loop_burnout = abs(pv - sp) > 30.0
+
+    # --- Active SP: production=0, standby/idle=1 ---
+    active_sp = 1 if state_str == "IDLE_HOT" else 0
+
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
@@ -80,8 +92,14 @@ def generate_reading(is_anomaly: bool = False) -> dict:
             "present_value_pv_c": pv,
             "set_point_sp_c": sp,
             "manipulated_variable_mv_heat_percent": mv,
+            "proportional_band_p": p_band,
+            "integral_time_i_sec": i_time,
+            "derivative_time_d_sec": d_time,
             "heater_burnout_alarm_hb": hb,
+            "ssr_failure_alarm": ssr_fail,
+            "loop_burnout_alarm": loop_burnout,
             "temperature_input_error": error,
+            "active_sp_number": active_sp,
             "temp_trend_15min": trend,
             "machine_thermal_state": state_str
         }

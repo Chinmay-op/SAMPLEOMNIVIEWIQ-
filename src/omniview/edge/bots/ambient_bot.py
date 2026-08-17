@@ -47,7 +47,20 @@ def generate_reading() -> dict:
     rh_pct = 60.0 - (math.cos(phase) * 20.0) + random.uniform(-2.0, 2.0)
     
     offset = compute_baseline_offset(temp_c)
-        
+
+    # --- Dew point: Magnus formula ---
+    a = 17.27
+    b = 237.7
+    alpha = (a * temp_c) / (b + temp_c) + math.log(max(0.01, rh_pct) / 100.0)
+    dew_point = round((b * alpha) / (a - alpha), 2)
+
+    # --- Heat index: simplified Steadman formula ---
+    e = (rh_pct / 100.0) * 6.105 * math.exp((a * temp_c) / (b + temp_c))
+    heat_index = round(temp_c + 0.33 * e - 0.70 * 0.5 - 4.0, 2)
+
+    # --- Wireless RSSI: degrades with temperature (more EMI from hot equipment) ---
+    rssi = int(-65 - (temp_c - 25.0) * 0.3 + random.uniform(-3, 3))
+
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": now.isoformat() + "Z",
@@ -55,6 +68,9 @@ def generate_reading() -> dict:
         "data": {
             "ambient_temp_c": round(temp_c, 2),
             "relative_humidity_pct": round(rh_pct, 1),
+            "dew_point_c": dew_point,
+            "heat_index_c": heat_index,
+            "wireless_signal_strength_dbm": rssi,
             "environmental_baseline_offset": round(offset, 2)
         }
     }

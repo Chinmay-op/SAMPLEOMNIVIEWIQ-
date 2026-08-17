@@ -37,16 +37,18 @@ def bar_to_raw(pressure_bar: float) -> int:
 
 
 current_pressure = 33.0
+pressure_min_memory = 33.0
+pressure_max_memory = 33.0
+TEACH_SP1 = 25.0  # Low-pressure alarm threshold
+TEACH_SP2 = 18.0  # Critical-low threshold
 
 def generate_reading(is_anomaly: bool = False) -> dict:
-    global current_pressure
+    global current_pressure, pressure_min_memory, pressure_max_memory
 
     if is_anomaly:
         # Leak anomaly
         current_pressure = max(0.0, current_pressure - random.uniform(1.0, 3.0))
         pressure = current_pressure
-        out1 = True # Low threshold
-        out2 = pressure < 20.0 # Critical threshold
         status = 1
         comp_state = "LOADED"
         trend = "FALLING"
@@ -54,11 +56,17 @@ def generate_reading(is_anomaly: bool = False) -> dict:
         # Normal
         current_pressure = round(random.uniform(28.0, 36.0), 2)
         pressure = current_pressure
-        out1 = False
-        out2 = False
         status = 0
         comp_state = random.choice(["LOADED", "UNLOADED"])
         trend = "STABLE"
+
+    # --- Switching outputs: causally driven by teach SP thresholds ---
+    out1 = pressure < TEACH_SP1
+    out2 = pressure < TEACH_SP2
+
+    # --- Min/Max memory: tracks running extremes ---
+    pressure_min_memory = min(pressure_min_memory, pressure)
+    pressure_max_memory = max(pressure_max_memory, pressure)
 
     pdv_raw = bar_to_raw(pressure)
     temp_c = round(random.uniform(28.0, 40.0), 1)
@@ -70,6 +78,11 @@ def generate_reading(is_anomaly: bool = False) -> dict:
         "data": {
             "process_data_variable_raw": pdv_raw,
             "pressure_bar": pressure,
+            "pressure_unit": "bar",
+            "pressure_min_memory_bar": round(pressure_min_memory, 2),
+            "pressure_max_memory_bar": round(pressure_max_memory, 2),
+            "teach_sp1_bar": TEACH_SP1,
+            "teach_sp2_bar": TEACH_SP2,
             "switching_output_1_active": out1,
             "switching_output_2_active": out2,
             "device_status_code": status,

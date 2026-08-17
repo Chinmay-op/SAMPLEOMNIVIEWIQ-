@@ -54,6 +54,21 @@ def generate_reading(is_anomaly: bool = False) -> dict:
 
     zone = classify_iso_zone(z_rms)
 
+    # --- Kurtosis: derived from ISO zone (Gaussian=3.0, fault=8+) ---
+    zone_kurtosis_map = {"ZONE_A": 3.0, "ZONE_B": 4.0, "ZONE_C": 6.0, "ZONE_D": 8.5}
+    z_kurtosis = zone_kurtosis_map[zone] + random.uniform(-0.3, 0.3)
+    x_kurtosis = z_kurtosis * 0.85 + random.uniform(-0.2, 0.2)
+
+    # --- Crest factor: peak / RMS (direct computation) ---
+    z_crest = round(z_peak / hf_rms, 2) if hf_rms > 0 else 3.0
+    x_crest = round(x_peak / max(0.01, x_rms * 0.05), 2) if x_rms > 0 else 3.0
+
+    # --- Peak velocity frequency: healthy=running speed, fault=bearing defect ---
+    if zone in ["ZONE_A", "ZONE_B"]:
+        peak_freq = random.uniform(25.0, 50.0)  # 1x-2x running speed
+    else:
+        peak_freq = random.uniform(120.0, 300.0)  # bearing defect frequencies
+
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
@@ -64,8 +79,14 @@ def generate_reading(is_anomaly: bool = False) -> dict:
             "z_axis_peak_acceleration_g": round(z_peak, 2),
             "x_axis_peak_acceleration_g": round(x_peak, 2),
             "high_frequency_rms_acceleration_g": round(hf_rms, 2),
+            "z_axis_kurtosis": round(z_kurtosis, 2),
+            "x_axis_kurtosis": round(x_kurtosis, 2),
+            "z_axis_crest_factor": z_crest,
+            "x_axis_crest_factor": x_crest,
+            "peak_velocity_component_freq_hz": round(peak_freq, 1),
             "temperature_c": round(temp_c, 2),
-            "iso_health_zone": zone
+            "iso_health_zone": zone,
+            "data_source": "synthetic"
         }
     }
     return payload

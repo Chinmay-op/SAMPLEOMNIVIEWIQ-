@@ -36,7 +36,6 @@ def generate_reading(is_anomaly: bool = False) -> dict:
     global current_counter, operating_hours
     
     # At 22s/cycle, a 15s poll interval usually has 0 strokes, sometimes 1.
-    # We will simulate this probabilistically: 15/22 ≈ 68% chance of 1 stroke, 32% chance of 0.
     if is_anomaly:
         strokes = random.choices([0, 1], weights=[0.8, 0.2])[0]
         cycle_time = round(random.uniform(25.5, 30.0), 2) if strokes > 0 else 0.0
@@ -51,17 +50,29 @@ def generate_reading(is_anomaly: bool = False) -> dict:
     
     # switching state true 20% of time (metal detected)
     bdc1 = random.random() < 0.20
-    
+
+    # --- BDC2: complementary output (inverted from BDC1) ---
+    bdc2 = not bdc1
+
+    # --- Sensing distance margin: derived from signal quality (same physical degradation) ---
+    sensing_margin = round((signal_quality / 255.0) * 100.0, 1)
+
+    # --- Device status: derived from signal quality threshold ---
+    device_status = 0 if signal_quality > 180 else 1
+
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
         "sensor_type": "digital_pulse_counter",
         "data": {
             "switching_state_bdc1": bdc1,
+            "switching_state_bdc2": bdc2,
             "counter_value": current_counter,
             "device_temperature_c": round(28.0 + random.uniform(0, 7.0), 1),
             "operating_hours": int(operating_hours),
             "signal_quality": signal_quality,
+            "sensing_distance_margin_pct": sensing_margin,
+            "device_status_code": device_status,
             "strokes_in_interval": strokes,
             "last_cycle_time_seconds": cycle_time
         }

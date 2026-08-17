@@ -33,43 +33,96 @@ def validate_payload(payload):
             print(f"Schema Validation Error: {e.message}")
 
 
+cumulative_kwh = 150000.0
+
 def generate_reading(is_anomaly: bool = False) -> dict:
-    """Fallback generator if no CSV is present."""
-    voltage = 415.0 + random.uniform(-2, 2)
-    current = 200.0 + random.uniform(-10, 10)
-    pf = 0.95 + random.uniform(-0.02, 0.02)
-    
+    """Generates correlated per-phase electrical readings from physics."""
+    global cumulative_kwh
+
+    voltage_ll = 415.0 + random.uniform(-2, 2)
+    current_avg = 200.0 + random.uniform(-10, 10)
+    pf_avg = 0.95 + random.uniform(-0.02, 0.02)
+
     if is_anomaly:
-        current += 100.0
-        pf -= 0.1
+        current_avg += 100.0
+        pf_avg -= 0.1
 
-    kw = (voltage * current * pf * 1.732) / 1000
-    kva = (voltage * current * 1.732) / 1000
-    thd = 3.0 + random.uniform(0, 1)
+    v_ln_avg = voltage_ll / 1.732
 
-    # Missing schema fields mapped here
-    rolling_kva = kva + random.uniform(-5, 5) # Approximation for edge-computed metric
-    md_limit = 150.0 # arbitrary contracted limit
+    # --- Per-phase voltages: derived from average with slight imbalance ---
+    imb_v1 = random.gauss(0, 0.008)  # ~0.8% imbalance
+    imb_v2 = random.gauss(0, 0.008)
+    v_l1 = v_ln_avg * (1.0 + imb_v1)
+    v_l2 = v_ln_avg * (1.0 + imb_v2)
+    v_l3 = 3.0 * v_ln_avg - v_l1 - v_l2  # ensures avg identity
+
+    # --- Per-phase currents: derived from average with load imbalance ---
+    imb_i1 = random.gauss(0, 0.03)  # ~3% load imbalance
+    imb_i2 = random.gauss(0, 0.03)
+    i_l1 = current_avg * (1.0 + imb_i1)
+    i_l2 = current_avg * (1.0 + imb_i2)
+    i_l3 = 3.0 * current_avg - i_l1 - i_l2
+    i_neutral = abs(i_l1 - i_l2) * random.uniform(0.10, 0.25)
+
+    # --- Power calculations ---
+    kw = (voltage_ll * current_avg * pf_avg * 1.732) / 1000
+    kva = (voltage_ll * current_avg * 1.732) / 1000
+    kvar = (kva**2 - kw**2)**0.5 if kva > kw else 0.0
+
+    # Per-phase active power
+    imb_p = random.gauss(0, 0.02)
+    kw_l1 = (kw / 3.0) * (1.0 + imb_p)
+    kw_l2 = (kw / 3.0) * (1.0 + random.gauss(0, 0.02))
+    kw_l3 = kw - kw_l1 - kw_l2
+
+    # Per-phase power factor
+    pf_l1 = min(1.0, abs(pf_avg + random.gauss(0, 0.01)))
+    pf_l2 = min(1.0, abs(pf_avg + random.gauss(0, 0.01)))
+    pf_l3 = min(1.0, abs(pf_avg + random.gauss(0, 0.01)))
+
+    # --- THD: scales with load (heavier load = more harmonics) ---
+    max_kw = 200.0
+    load_ratio = min(1.0, kw / max_kw)
+    thd_v = round(2.0 + load_ratio * 3.0 + random.uniform(-0.3, 0.3), 2)
+    thd_i = round(5.0 + load_ratio * 10.0 + random.uniform(-0.5, 0.5), 2)
+
+    # Edge-computed metrics
+    rolling_kva = kva + random.uniform(-5, 5)
+    md_limit = 150.0
     md_proximity = (rolling_kva / md_limit) * 100
 
-    kvar = (kva**2 - kw**2)**0.5 if kva > kw else 0.0
-    energy_base = 150000.0 + random.uniform(0, 100)
+    cumulative_kwh += kw * (POLL_INTERVAL / 3600.0)
 
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
         "sensor_type": "electrical_meter",
         "data": {
-            "voltage_v_ln_avg": round(voltage / 1.732, 2),
-            "voltage_v_ll_avg": round(voltage, 2),
-            "current_a_avg": round(current, 2),
+            "voltage_v_ln_avg": round(v_ln_avg, 2),
+            "voltage_v_ll_avg": round(voltage_ll, 2),
+            "voltage_v_l1_n": round(v_l1, 2),
+            "voltage_v_l2_n": round(v_l2, 2),
+            "voltage_v_l3_n": round(v_l3, 2),
+            "current_a_avg": round(current_avg, 2),
+            "current_a_l1": round(i_l1, 2),
+            "current_a_l2": round(i_l2, 2),
+            "current_a_l3": round(i_l3, 2),
+            "current_a_neutral": round(i_neutral, 2),
             "active_power_kw_total": round(kw, 2),
+            "active_power_kw_l1": round(kw_l1, 2),
+            "active_power_kw_l2": round(kw_l2, 2),
+            "active_power_kw_l3": round(kw_l3, 2),
             "apparent_power_kva_total": round(kva, 2),
             "reactive_power_kvar_total": round(kvar, 2),
-            "power_factor_avg": round(pf, 3),
+            "power_factor_avg": round(pf_avg, 3),
+            "power_factor_l1": round(pf_l1, 3),
+            "power_factor_l2": round(pf_l2, 3),
+            "power_factor_l3": round(pf_l3, 3),
             "frequency_hz": round(50.0 + random.uniform(-0.2, 0.2), 2),
-            "active_energy_kwh": round(energy_base, 2),
-            "apparent_energy_kvah": round(energy_base * 1.05, 2),
+            "voltage_thd_percent": thd_v,
+            "current_thd_percent": thd_i,
+            "active_energy_kwh": round(cumulative_kwh, 2),
+            "apparent_energy_kvah": round(cumulative_kwh * 1.05, 2),
             "rolling_kva_15min": round(rolling_kva, 2),
             "md_proximity_percent": round(md_proximity, 2)
         }
