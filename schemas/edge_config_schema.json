@@ -1,0 +1,213 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OmniView IQ — Edge Node Configuration Schema",
+  "description": "Validates edge_nodes.json: the device_id → node map used by edge pollers and replay bots. Both POC nodes (HP compressor + ISBM main feed) must be represented.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional self-reference to this schema"
+    },
+    "config_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of this config format"
+    },
+    "site": {
+      "type": "object",
+      "properties": {
+        "site_id": {
+          "type": "string",
+          "description": "Unique site identifier used in MQTT topics: omniview/{site_id}/{node}/{sensor}"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable site name"
+        },
+        "timezone": {
+          "type": "string",
+          "description": "IANA timezone for NTP alignment"
+        },
+        "contracted_demand_kva": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Contracted/sanctioned maximum demand (kVA) with utility (MSEDCL). Used for MD breach prediction."
+        },
+        "utility": {
+          "type": "string",
+          "description": "Electricity utility provider"
+        },
+        "tariff_category": {
+          "type": "string",
+          "description": "Tariff category / slab"
+        }
+      },
+      "required": ["site_id", "name", "contracted_demand_kva"]
+    },
+    "gateway": {
+      "type": "object",
+      "properties": {
+        "hardware": {
+          "type": "string",
+          "description": "Gateway hardware make/model"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["modbus_rtu", "modbus_tcp"],
+          "description": "Primary Modbus protocol"
+        },
+        "serial_port": {
+          "type": "string",
+          "description": "RS-485 serial port path on the gateway"
+        },
+        "baud_rate": {
+          "type": "integer",
+          "enum": [4800, 9600, 19200, 38400, 57600, 115200]
+        },
+        "data_bits": {
+          "type": "integer",
+          "enum": [7, 8]
+        },
+        "parity": {
+          "type": "string",
+          "enum": ["none", "even", "odd"]
+        },
+        "stop_bits": {
+          "type": "integer",
+          "enum": [1, 2]
+        },
+        "ntp_enabled": {
+          "type": "boolean",
+          "description": "NTP sync is mandatory for MD window alignment (PRD NFR: sub-second, max 5s drift)"
+        },
+        "offline_buffer_enabled": {
+          "type": "boolean",
+          "description": "Enable SQLite offline buffering for 4G outages (FR7)"
+        }
+      },
+      "required": ["hardware", "protocol"]
+    },
+    "nodes": {
+      "type": "object",
+      "description": "Map of node_id → node definition. POC requires at least compressor-01 and isbm-01.",
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9\\-]*$": {
+          "$ref": "#/definitions/node"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["config_version", "site", "nodes"],
+  "definitions": {
+    "node": {
+      "type": "object",
+      "properties": {
+        "display_name": {
+          "type": "string",
+          "description": "Human-readable node name"
+        },
+        "location": {
+          "type": "string",
+          "description": "Physical installation location on the factory floor"
+        },
+        "equipment_class": {
+          "type": "string",
+          "description": "Equipment classification for PdM priors"
+        },
+        "rated_kw": {
+          "type": ["number", "null"],
+          "description": "Nameplate rated power in kW (null if not applicable)"
+        },
+        "rated_bar": {
+          "type": ["number", "null"],
+          "description": "Nameplate rated pressure in bar (null if not applicable)"
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/device"
+          },
+          "minItems": 1,
+          "description": "Physical devices / sensors attached to this node"
+        }
+      },
+      "required": ["display_name", "location", "devices"]
+    },
+    "device": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9\\-]*$",
+          "description": "Globally unique device identifier. Used in MQTT payloads and TSDB records."
+        },
+        "sensor_type": {
+          "type": "string",
+          "enum": ["electrical", "vibration", "thermal", "pressure", "gas", "stroke", "ambient"],
+          "description": "Sensor family — must match one of the 7 canonical types from topics.py"
+        },
+        "hardware": {
+          "type": "string",
+          "description": "Sensor hardware make/model"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["modbus_rtu", "modbus_tcp", "wireless_modbus", "4-20mA_modbus"],
+          "description": "Communication protocol to the gateway"
+        },
+        "modbus_slave_address": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 247,
+          "description": "Modbus RTU slave address (1–247 per spec)"
+        },
+        "poll_interval_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Polling interval in seconds. Electrical=15s (FR1), physical=60s (architecture doc)."
+        },
+        "register_map": {
+          "type": "object",
+          "description": "Modbus register mapping: field_name → {address, count, type, unit}",
+          "patternProperties": {
+            "^[a-z_]+$": {
+              "$ref": "#/definitions/register_entry"
+            }
+          },
+          "additionalProperties": false
+        },
+        "notes": {
+          "type": "string",
+          "description": "Installation notes, references to PRD sections, etc."
+        }
+      },
+      "required": ["device_id", "sensor_type", "hardware", "protocol", "poll_interval_s"]
+    },
+    "register_entry": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Modbus register address"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of registers to read"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["float32", "uint16", "uint32", "int16", "int32"],
+          "description": "Data type for decoding"
+        },
+        "unit": {
+          "type": "string",
+          "description": "Engineering unit of the decoded value"
+        }
+      },
+      "required": ["address", "count", "type", "unit"]
+    }
+  }
+}

@@ -1,0 +1,185 @@
+{
+  "$schema": "../schemas/edge_config_schema.json",
+  "config_version": "1.0.0",
+  "site": {
+    "site_id": "pune-isbm",
+    "name": "ISBM-PET Bottle Manufacturing, Pune",
+    "timezone": "Asia/Kolkata",
+    "contracted_demand_kva": 500,
+    "utility": "MSEDCL",
+    "tariff_category": "HT-I"
+  },
+  "gateway": {
+    "hardware": "Teltonika RUT956",
+    "protocol": "modbus_rtu",
+    "serial_port": "/dev/ttyRS485-0",
+    "baud_rate": 9600,
+    "data_bits": 8,
+    "parity": "none",
+    "stop_bits": 1,
+    "ntp_enabled": true,
+    "offline_buffer_enabled": true
+  },
+  "nodes": {
+    "compressor-01": {
+      "display_name": "High-Pressure Compressor (25–40 bar)",
+      "location": "Compressor room — bearing housing + output receiver manifold",
+      "equipment_class": "rotary_screw_compressor",
+      "rated_kw": 37,
+      "rated_bar": 40,
+      "devices": [
+        {
+          "device_id": "pune-comp-mfm384",
+          "sensor_type": "electrical",
+          "hardware": "Selec MFM384-C-CE",
+          "protocol": "modbus_rtu",
+          "modbus_slave_address": 1,
+          "poll_interval_s": 15,
+          "register_map": {
+            "voltage_v_ln_avg":         {"address": 30001, "count": 2, "type": "float32", "unit": "V"},
+            "voltage_v_ll_avg":         {"address": 30003, "count": 2, "type": "float32", "unit": "V"},
+            "current_a_avg":            {"address": 30007, "count": 2, "type": "float32", "unit": "A"},
+            "active_power_kw_total":    {"address": 30013, "count": 2, "type": "float32", "unit": "kW"},
+            "apparent_power_kva_total": {"address": 30019, "count": 2, "type": "float32", "unit": "kVA"},
+            "reactive_power_kvar_total":{"address": 30025, "count": 2, "type": "float32", "unit": "kVAR"},
+            "power_factor_avg":         {"address": 30031, "count": 2, "type": "float32", "unit": "ratio"},
+            "frequency_hz":             {"address": 30037, "count": 2, "type": "float32", "unit": "Hz"},
+            "active_energy_kwh":        {"address": 30041, "count": 2, "type": "float32", "unit": "kWh"},
+            "apparent_energy_kvah":     {"address": 30045, "count": 2, "type": "float32", "unit": "kVAh"}
+          },
+          "notes": "CTs snapped on compressor motor feed phases at main panel exterior"
+        },
+        {
+          "device_id": "pune-comp-vib01",
+          "sensor_type": "vibration",
+          "hardware": "Banner Q45VT / NCD Wireless MEMS",
+          "protocol": "wireless_modbus",
+          "modbus_slave_address": 10,
+          "poll_interval_s": 60,
+          "register_map": {
+            "rms_velocity_mm_s":  {"address": 40001, "count": 2, "type": "float32", "unit": "mm/s"},
+            "accel_peak_g":       {"address": 40003, "count": 2, "type": "float32", "unit": "g"},
+            "surface_temp_c":     {"address": 40005, "count": 2, "type": "float32", "unit": "°C"}
+          },
+          "notes": "Magnetic/epoxy mount on compressor bearing housing. ISO 10816-3 Class II thresholds: 2.8 mm/s (alert), 7.1 mm/s (critical)"
+        },
+        {
+          "device_id": "pune-comp-wika01",
+          "sensor_type": "pressure",
+          "hardware": "WIKA A-10 (0–40 bar)",
+          "protocol": "4-20mA_modbus",
+          "modbus_slave_address": 20,
+          "poll_interval_s": 60,
+          "register_map": {
+            "pressure_bar":  {"address": 40101, "count": 2, "type": "float32", "unit": "bar"},
+            "pressure_psi":  {"address": 40103, "count": 2, "type": "float32", "unit": "psi"}
+          },
+          "notes": "Tapped into existing gauge port on compressor output receiver manifold. Pressure decay while loaded = leak proxy (FR6)"
+        },
+        {
+          "device_id": "pune-comp-therm01",
+          "sensor_type": "thermal",
+          "hardware": "Banner Q45VT co-located probe",
+          "protocol": "wireless_modbus",
+          "modbus_slave_address": 10,
+          "poll_interval_s": 60,
+          "register_map": {
+            "surface_temp_c": {"address": 40005, "count": 2, "type": "float32", "unit": "°C"}
+          },
+          "notes": "Co-located on vibration node. Shares Modbus address with pune-comp-vib01"
+        },
+        {
+          "device_id": "pune-comp-gas01",
+          "sensor_type": "gas",
+          "hardware": "Schneider HeatTag",
+          "protocol": "modbus_rtu",
+          "modbus_slave_address": 30,
+          "poll_interval_s": 60,
+          "register_map": {
+            "micro_particle_index": {"address": 40201, "count": 2, "type": "float32", "unit": "index"},
+            "overheating_flag":     {"address": 40203, "count": 1, "type": "uint16",  "unit": "bool"}
+          },
+          "notes": "Micro-particle / overheating detection near compressor motor"
+        }
+      ]
+    },
+    "isbm-01": {
+      "display_name": "ISBM Machine (Nissei ASB-70DPH)",
+      "location": "Production floor — main electrical panel + barrel zone",
+      "equipment_class": "injection_stretch_blow_molder",
+      "rated_kw": null,
+      "rated_bar": null,
+      "devices": [
+        {
+          "device_id": "pune-isbm-mfm384",
+          "sensor_type": "electrical",
+          "hardware": "Selec MFM384-C-CE",
+          "protocol": "modbus_rtu",
+          "modbus_slave_address": 2,
+          "poll_interval_s": 15,
+          "register_map": {
+            "voltage_v_ln_avg":         {"address": 30001, "count": 2, "type": "float32", "unit": "V"},
+            "voltage_v_ll_avg":         {"address": 30003, "count": 2, "type": "float32", "unit": "V"},
+            "current_a_avg":            {"address": 30007, "count": 2, "type": "float32", "unit": "A"},
+            "active_power_kw_total":    {"address": 30013, "count": 2, "type": "float32", "unit": "kW"},
+            "apparent_power_kva_total": {"address": 30019, "count": 2, "type": "float32", "unit": "kVA"},
+            "reactive_power_kvar_total":{"address": 30025, "count": 2, "type": "float32", "unit": "kVAR"},
+            "power_factor_avg":         {"address": 30031, "count": 2, "type": "float32", "unit": "ratio"},
+            "frequency_hz":             {"address": 30037, "count": 2, "type": "float32", "unit": "Hz"},
+            "active_energy_kwh":        {"address": 30041, "count": 2, "type": "float32", "unit": "kWh"},
+            "apparent_energy_kvah":     {"address": 30045, "count": 2, "type": "float32", "unit": "kVAh"}
+          },
+          "notes": "CTs snapped on ISBM main electrical feed at panel exterior"
+        },
+        {
+          "device_id": "pune-isbm-therm01",
+          "sensor_type": "thermal",
+          "hardware": "Surface-mounted RTD / thermocouple",
+          "protocol": "modbus_rtu",
+          "modbus_slave_address": 11,
+          "poll_interval_s": 60,
+          "register_map": {
+            "barrel_temp_c":    {"address": 40301, "count": 2, "type": "float32", "unit": "°C"},
+            "hotrunner_temp_c": {"address": 40303, "count": 2, "type": "float32", "unit": "°C"}
+          },
+          "notes": "Surface-mounted on barrel / hot-runner zone. Lazy-idle detection: temp elevated + current low for >15 min = LAZY_IDLE_EVENT (FR5)"
+        },
+        {
+          "device_id": "pune-isbm-stroke01",
+          "sensor_type": "stroke",
+          "hardware": "Pulse counter (proximity sensor)",
+          "protocol": "modbus_rtu",
+          "modbus_slave_address": 12,
+          "poll_interval_s": 15,
+          "register_map": {
+            "cycle_count_total":  {"address": 40401, "count": 2, "type": "uint32", "unit": "count"},
+            "cycles_per_minute":  {"address": 40403, "count": 2, "type": "float32", "unit": "cpm"}
+          },
+          "notes": "Production cycle counter for OEE calculation. Polled at electrical cadence for correlation"
+        }
+      ]
+    },
+    "floor": {
+      "display_name": "Factory Floor Ambient",
+      "location": "Shop floor / control room — wall/pillar mount",
+      "equipment_class": "environmental_monitor",
+      "rated_kw": null,
+      "rated_bar": null,
+      "devices": [
+        {
+          "device_id": "pune-floor-ambient01",
+          "sensor_type": "ambient",
+          "hardware": "Schneider TH110",
+          "protocol": "modbus_rtu",
+          "modbus_slave_address": 40,
+          "poll_interval_s": 60,
+          "register_map": {
+            "temperature_c":      {"address": 40501, "count": 2, "type": "float32", "unit": "°C"},
+            "relative_humidity":  {"address": 40503, "count": 2, "type": "float32", "unit": "%RH"}
+          },
+          "notes": "Shop floor ambient temperature and humidity. Correlated with compressor/ISBM on/off state by DevB bots"
+        }
+      ]
+    }
+  }
+}
