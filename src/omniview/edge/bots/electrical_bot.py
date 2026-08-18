@@ -127,6 +127,8 @@ def generate_reading(is_anomaly: bool = False) -> dict:
             "md_proximity_percent": round(md_proximity, 2)
         }
     }
+    
+    _write_edge_state(payload)
     return payload
 
 
@@ -165,7 +167,21 @@ def map_csv_row_to_payload(row):
             "md_proximity_percent": cast_or_default(row.get("md_proximity_percent", 50.0), float)
         }
     }
+    
+    _write_edge_state(payload)
     return payload
+
+def _write_edge_state(payload: dict):
+    state = {
+        "current_a_avg": payload["data"].get("current_a_avg", 0.0),
+        "active_power_kw_total": payload["data"].get("active_power_kw_total", 0.0)
+    }
+    state_file = Path(".edge_state.json")
+    try:
+        with open(state_file, 'w') as f:
+            json.dump(state, f)
+    except Exception as e:
+        print(f"Failed to write edge state: {e}")
 
 
 from omniview.edge.mqtt_client import OmniViewMQTTClient

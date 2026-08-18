@@ -69,6 +69,10 @@ def generate_vibration_data():
     df["surface_temperature_c"] = df["surface_temperature_c"].rolling(window=15, min_periods=1).mean().round(2)
     df["rms_velocity_mm_s"] = np.round(rms, 3)
     
+    # Calculate Kurtosis and Crest Factor based on degradation
+    df["z_axis_kurtosis"] = np.round(3.0 + (df["degradation_pct"] * 5.0) + np.random.normal(0, 0.2, total_rows), 2)
+    df["x_axis_crest_factor"] = np.round(2.0 + (df["degradation_pct"] * 3.0) + np.random.normal(0, 0.1, total_rows), 2)
+    
     # 5. Compute Edge-Derived ISO Zones
     print(" -> Classifying ISO 10816-3 zones...")
     df["iso_health_zone"] = np.where(
@@ -97,6 +101,8 @@ def generate_vibration_data():
         "timestamp": df["timestamp"],
         "sensor_type": "vibration_node",
         "rms_velocity_mm_s": df["rms_velocity_mm_s"],
+        "z_axis_kurtosis": df["z_axis_kurtosis"],
+        "x_axis_crest_factor": df["x_axis_crest_factor"],
         "surface_temperature_c": df["surface_temperature_c"],
         "iso_health_zone": df["iso_health_zone"],
         "vibration_trend_10min": df["vibration_trend_10min"],

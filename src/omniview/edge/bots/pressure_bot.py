@@ -45,19 +45,31 @@ TEACH_SP2 = 18.0  # Critical-low threshold
 def generate_reading(is_anomaly: bool = False) -> dict:
     global current_pressure, pressure_min_memory, pressure_max_memory
 
+    # --- Read Shared Edge State ---
+    edge_state = {}
+    state_file = Path(".edge_state.json")
+    if state_file.exists():
+        try:
+            with open(state_file, 'r') as f:
+                edge_state = json.load(f)
+        except Exception:
+            pass
+            
+    elec_current = edge_state.get("current_a_avg", 100.0)
+
     if is_anomaly:
         # Leak anomaly
         current_pressure = max(0.0, current_pressure - random.uniform(1.0, 3.0))
         pressure = current_pressure
         status = 1
-        comp_state = "LOADED"
+        comp_state = "UNLOADED" # Leak detection triggers when unloaded
         trend = "FALLING"
     else:
         # Normal
         current_pressure = round(random.uniform(28.0, 36.0), 2)
         pressure = current_pressure
         status = 0
-        comp_state = random.choice(["LOADED", "UNLOADED"])
+        comp_state = "LOADED" if elec_current > 50.0 else "UNLOADED"
         trend = "STABLE"
 
     # --- Switching outputs: causally driven by teach SP thresholds ---

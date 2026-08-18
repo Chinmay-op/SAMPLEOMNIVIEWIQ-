@@ -35,8 +35,24 @@ NOMINAL_CYCLE_TIME_S = 22.0
 def generate_reading(is_anomaly: bool = False) -> dict:
     global current_counter, operating_hours
     
+    # --- Read Shared Edge State ---
+    edge_state = {}
+    state_file = Path(".edge_state.json")
+    if state_file.exists():
+        try:
+            with open(state_file, 'r') as f:
+                edge_state = json.load(f)
+        except Exception:
+            pass
+            
+    elec_current = edge_state.get("current_a_avg", 100.0)
+
     # At 22s/cycle, a 15s poll interval usually has 0 strokes, sometimes 1.
-    if is_anomaly:
+    if elec_current < 50.0:
+        strokes = 0
+        cycle_time = 0.0
+        signal_quality = random.randint(240, 255)
+    elif is_anomaly:
         strokes = random.choices([0, 1], weights=[0.8, 0.2])[0]
         cycle_time = round(random.uniform(25.5, 30.0), 2) if strokes > 0 else 0.0
         signal_quality = random.randint(180, 220) # degraded

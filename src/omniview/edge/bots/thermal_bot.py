@@ -41,6 +41,18 @@ def generate_reading(is_anomaly: bool = False) -> dict:
     hb = False
     error = False
 
+    # --- Read Shared Edge State ---
+    edge_state = {}
+    state_file = Path(".edge_state.json")
+    if state_file.exists():
+        try:
+            with open(state_file, 'r') as f:
+                edge_state = json.load(f)
+        except Exception:
+            pass
+            
+    elec_current = edge_state.get("current_a_avg", 100.0)
+
     if is_anomaly:
         state_cycle = "AT_SETPOINT"
         pv = round(random.uniform(275.5, 300.0), 1)
@@ -69,6 +81,10 @@ def generate_reading(is_anomaly: bool = False) -> dict:
             mv = round(random.uniform(30.0, 60.0), 1)
             trend = "STABLE"
             state_str = "AT_SETPOINT"
+
+    # --- Cross-Sensor Lazy-Idle override ---
+    if elec_current < 10.0 and pv > 200.0:
+        state_str = "IDLE_HOT"
 
     # --- PID tuning constants (fixed for this barrel zone) ---
     p_band = 5.0

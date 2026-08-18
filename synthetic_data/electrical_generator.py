@@ -106,7 +106,12 @@ def generate_electrical_data():
     upsampled_df["active_power_kw"] = np.round(np.clip(kw, 0, 1000), 2)
     upsampled_df["power_factor"] = np.round(np.clip(pf, 0.1, 1.0), 3)
     upsampled_df["current_a"] = np.round(np.clip(current, 0, 1200), 2)
-    upsampled_df["thd_current_percent"] = np.round(np.clip(thd, 0, 20), 2)
+    upsampled_df["current_thd_percent"] = np.round(np.clip(thd, 0, 20), 2)
+    
+    # Calculate voltage THD (usually 1-3%)
+    voltage_thd = np.random.uniform(1.0, 3.0, total_rows)
+    voltage_thd[is_idle] = np.random.uniform(2.5, 4.5, np.sum(is_idle))
+    upsampled_df["voltage_thd_percent"] = np.round(voltage_thd, 2)
     
     # 8. Compute Edge-Derived rolling averages (The 15-minute MD window)
     print(" -> Computing Edge MD derivations...")
@@ -126,7 +131,8 @@ def generate_electrical_data():
         "active_power_kw": upsampled_df["active_power_kw"],
         "apparent_power_kva": upsampled_df["apparent_power_kva"],
         "power_factor": upsampled_df["power_factor"],
-        "thd_current_percent": upsampled_df["thd_current_percent"],
+        "voltage_thd_percent": upsampled_df["voltage_thd_percent"],
+        "current_thd_percent": upsampled_df["current_thd_percent"],
         "rolling_kva_15min": upsampled_df["rolling_kva_15min"],
         "md_proximity_percent": upsampled_df["md_proximity_percent"],
         "machine_state": upsampled_df["machine_state"], # Ground truth

@@ -40,6 +40,8 @@ EVENT_TYPES = {
     "GRADUAL_PRESSURE_NARROWING": "GRADUAL_PRESSURE_NARROWING",
     "GRADUAL_PF_DRIFT": "GRADUAL_PF_DRIFT",
     "SENSOR_GLITCH": "SENSOR_GLITCH",
+    "PARTICLE_OVERHEATING": "PARTICLE_OVERHEATING",
+    "STROKE_RATE_DROP": "STROKE_RATE_DROP",
 }
 
 # ── Valid state transitions ───────────────────────────────
@@ -200,6 +202,8 @@ def _inject_critical_scenarios(timeline_df: pd.DataFrame) -> pd.DataFrame:
         ("PNEUMATIC_LEAK", cfg["pneumatic_leak_events_per_year"], 15, 35),
         ("VIBRATION_ZONE_D", cfg["vibration_zone_d_events_per_year"], 8, 20),
         ("CONFLICT_SCENARIO", cfg["conflict_scenario_events_per_year"], 15, 30),
+        ("PARTICLE_OVERHEATING", cfg.get("gas_events_per_year", 4), 10, 45),
+        ("STROKE_RATE_DROP", cfg.get("stroke_drop_events_per_year", 10), 15, 60),
     ]
 
     normal_indices = timeline_df[timeline_df["machine_state"] == "NORMAL"].index.tolist()

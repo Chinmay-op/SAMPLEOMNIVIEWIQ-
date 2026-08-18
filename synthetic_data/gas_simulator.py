@@ -63,6 +63,16 @@ def generate_gas_data():
             else:
                 temp_rise = random.uniform(-0.1, 0.1)
                 
+            # Compute Humidity and AQI
+            if severity in ["ALARM", "CRITICAL"]:
+                humidity = random.uniform(60.0, 82.0)
+            elif severity == "WARNING":
+                humidity = random.uniform(50.0, 65.0)
+            else:
+                humidity = random.uniform(38.0, 55.0)
+                
+            aqi = min(10, int((gas_ppm / 10.0) + (particle_idx / 25.0)))
+                
             ts_str = current_time.isoformat() + "Z"
             row = [
                 device_id,
@@ -71,6 +81,8 @@ def generate_gas_data():
                 f"{particle_idx:.2f}",
                 f"{panel_temp:.1f}",
                 f"{temp_rise:.2f}",
+                f"{humidity:.1f}",
+                f"{aqi}",
                 severity
             ]
             
