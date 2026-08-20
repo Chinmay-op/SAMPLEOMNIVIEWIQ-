@@ -50,6 +50,7 @@ from omniview.config import (
     MQTT_KEEPALIVE,
     MQTT_QOS,
 )
+from omniview.edge.buffer_replay import BufferReplayEngine, ReplayResult
 from omniview.edge.offline_buffer import OfflineBuffer
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,15 @@ class OmniViewMQTTClient:
         self._drain_batch_size = BUFFER_DRAIN_BATCH_SIZE
         self._drain_thread: threading.Thread | None = None
         self._stop_drain = threading.Event()
+
+        # Replay engine (OI-29) — timestamp-sorted merge + chronological replay
+        self._replay_engine = BufferReplayEngine(
+            buffer=self._buffer,
+            publish_fn=self._replay_publish,
+            batch_size=self._drain_batch_size,
+            inter_batch_delay=0.1,
+        )
+        self._last_replay_result: ReplayResult | None = None
 
         # Callback registry: topic_filter -> list of callbacks
         self._subscriptions: dict[str, list[MessageCallback]] = {}
@@ -175,6 +185,11 @@ class OmniViewMQTTClient:
     def is_connected(self) -> bool:
         """Return ``True`` if currently connected to the broker."""
         return self._connected.is_set()
+
+    @property
+    def last_replay_result(self) -> ReplayResult | None:
+        """Return the result of the most recent buffer replay (OI-29)."""
+        return self._last_replay_result
 
     # ── Context manager ─────────────────────────────────────────────────────
 
@@ -286,48 +301,59 @@ class OmniViewMQTTClient:
         )
         self._drain_thread.start()
 
+    def _replay_publish(self, topic: str, payload_str: str) -> bool:
+        """Publish a single replayed message (used by BufferReplayEngine).
+
+        Returns ``True`` if the message was successfully published.
+        """
+        try:
+            info = self._client.publish(topic, payload_str, qos=self._qos)
+            info.wait_for_publish(timeout=2.0)
+            return info.is_published()
+        except Exception:
+            logger.exception("Replay publish failed for topic %s", topic)
+            return False
+
     def _drain_loop(self) -> None:
-        """Continuously drain the buffer while connected."""
-        logger.info("Started offline buffer drain loop")
-        
+        """Continuously drain the buffer while connected (OI-29).
+
+        Delegates to :class:`~omniview.edge.buffer_replay.BufferReplayEngine`
+        for timestamp-sorted merge and chronological replay.
+        """
+        logger.info("Started offline buffer drain loop (OI-29 replay engine)")
+
         while self._connected.is_set() and not self._stop_drain.is_set():
             count = self._buffer.count()
             if count == 0:
                 # Buffer is empty, sleep and check again later
                 time.sleep(1.0)
                 continue
-                
-            logger.info("Draining %d messages from offline buffer", count)
-            
-            # Fetch a batch
-            messages = self._buffer.drain(self._drain_batch_size)
-            if not messages:
+
+            # Delegate to the replay engine for timestamp-sorted
+            # chronological replay across all sensor families
+            result = self._replay_engine.replay(
+                is_connected_fn=lambda: self._connected.is_set(),
+                stop_event=self._stop_drain,
+            )
+            self._last_replay_result = result
+
+            logger.info(
+                "Buffer replay result: %d/%d replayed, %d failed, "
+                "%.1fs elapsed",
+                result.replayed,
+                result.total,
+                result.failed,
+                result.duration_seconds,
+            )
+
+            # If buffer is now empty, exit the drain loop
+            if self._buffer.count() == 0:
+                logger.info("Offline buffer fully drained — drain loop exiting")
+                break
+
+            # If there were failures, wait before retrying
+            if result.failed > 0:
                 time.sleep(1.0)
-                continue
-                
-            # Publish batch
-            published_ids = []
-            for msg in messages:
-                if not self._connected.is_set() or self._stop_drain.is_set():
-                    break
-                    
-                message_str = json.dumps(msg.payload, default=str)
-                info = self._client.publish(msg.topic, message_str, qos=self._qos)
-                # Wait for publish to complete before acking
-                info.wait_for_publish(timeout=2.0)
-                if info.is_published():
-                    published_ids.append(msg.id)
-                else:
-                    logger.warning("Failed to publish buffered message ID %d", msg.id)
-                    break # Stop batch if publish fails
-            
-            # Ack successfully published messages
-            if published_ids:
-                self._buffer.ack(published_ids)
-                logger.debug("Acked %d buffered messages", len(published_ids))
-            
-            # Brief pause between batches to not flood the broker
-            time.sleep(0.1)
 
     # ── Paho callbacks (internal) ───────────────────────────────────────────
 

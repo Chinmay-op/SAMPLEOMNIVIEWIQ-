@@ -1,14 +1,16 @@
 """
-TimescaleDB connection helpers — OI-54
-=======================================
+TimescaleDB connection helpers — OI-54 + OI-15
+================================================
 
 Provides:
 - ``get_engine()``          — SQLAlchemy engine (singleton) from ``omniview.config``
 - ``ensure_timescaledb()``  — idempotent ``CREATE EXTENSION``
 - ``create_hypertables()``  — idempotent DDL for all 7 sensor-family hypertables
 - ``insert_reading()``      — single-row idempotent upsert
-- ``insert_readings_batch()`` — bulk idempotent upsert
+- ``insert_readings_batch()`` — bulk idempotent upsert (multi-value INSERT)
+- ``backfill_insert()``     — chronological backfill with chunked multi-value INSERT (OI-15)
 - ``query_latest()``        — fetch most-recent N readings for a device
+- ``query_by_time_range()`` — fetch readings for a device within a time window (OI-15)
 
 Design notes (PRD §5.4 + System Workflow §3.3):
 - One table per sensor family (electrical, vibration, thermal, pressure,
@@ -20,11 +22,15 @@ Design notes (PRD §5.4 + System Workflow §3.3):
   schemas are still evolving (OI-23/5/6/7).
 - Late / backfilled readings insert at their correct historical position —
   TimescaleDB handles out-of-order writes natively.
+- Backfill inserts (OI-15) use chunked multi-value INSERT for performance
+  during large chronological replays (offline buffer drain, historical import).
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -192,6 +198,41 @@ def create_hypertables(engine: Engine | None = None) -> list[str]:
     return created
 
 
+# ── OI-15 — BackfillResult dataclass ───────────────────────────────────────
+
+
+@dataclass
+class BackfillResult:
+    """Result of a backfill insert operation.
+
+    Attributes
+    ----------
+    total : int
+        Total number of readings submitted.
+    inserted : int
+        Number of new rows actually inserted.
+    duplicates : int
+        Number of rows skipped as duplicates.
+    sensor_type : str
+        The sensor family this backfill targeted.
+    """
+
+    total: int = 0
+    inserted: int = 0
+    duplicates: int = 0
+    sensor_type: str = ""
+
+    @property
+    def is_clean(self) -> bool:
+        """True if every submitted reading was either inserted or a dup."""
+        return self.inserted + self.duplicates == self.total
+
+
+# ── Chunk size for multi-value INSERT ──────────────────────────────────────
+
+_BACKFILL_CHUNK_SIZE = 100
+
+
 # ── DML — insert helpers ───────────────────────────────────────────────────
 
 
@@ -247,8 +288,6 @@ def insert_reading(
     eng = engine or get_engine()
     tbl = _table_name(sensor_type)
 
-    import json
-
     with eng.begin() as conn:
         result = conn.execute(
             text(f"""
@@ -280,12 +319,22 @@ def insert_reading(
     return inserted
 
 
+def _chunked(lst: list, size: int):
+    """Yield successive chunks of *size* from *lst*."""
+    for i in range(0, len(lst), size):
+        yield lst[i : i + size]
+
+
 def insert_readings_batch(
     sensor_type: str,
     readings: list[dict[str, Any]],
     engine: Engine | None = None,
 ) -> int:
     """Bulk-insert multiple readings for a sensor family (idempotent).
+
+    Uses chunked multi-value INSERT for efficient batch processing.
+    Each chunk is inserted in a single SQL statement with
+    ``ON CONFLICT DO NOTHING``.
 
     Each item in *readings* must contain keys:
     ``device_id``, ``site_id``, ``time``, ``data``, and optionally
@@ -314,31 +363,44 @@ def insert_readings_batch(
             f"Must be one of: {sorted(SENSOR_TYPES)}"
         )
 
-    import json
-
     eng = engine or get_engine()
     tbl = _table_name(sensor_type)
     total_inserted = 0
 
-    with eng.begin() as conn:
-        for r in readings:
-            result = conn.execute(
-                text(f"""
-                    INSERT INTO {tbl} (time, device_id, site_id, sensor_type,
-                                       schema_version, data)
-                    VALUES (:time, :device_id, :site_id, :sensor_type,
-                            :schema_version, CAST(:data AS jsonb))
-                    ON CONFLICT (device_id, time) DO NOTHING
-                """),
-                {
-                    "time": r["time"],
-                    "device_id": r["device_id"],
-                    "site_id": r["site_id"],
-                    "sensor_type": sensor_type,
-                    "schema_version": r.get("schema_version", "1.0"),
-                    "data": json.dumps(r["data"], default=str),
-                },
+    for chunk in _chunked(readings, _BACKFILL_CHUNK_SIZE):
+        params: list[dict[str, Any]] = []
+        value_clauses: list[str] = []
+
+        for idx, r in enumerate(chunk):
+            suffix = f"_{idx}"
+            value_clauses.append(
+                f"(:time{suffix}, :device_id{suffix}, :site_id{suffix}, "
+                f":sensor_type{suffix}, :schema_version{suffix}, "
+                f"CAST(:data{suffix} AS jsonb))"
             )
+            params.append({
+                f"time{suffix}": r["time"],
+                f"device_id{suffix}": r["device_id"],
+                f"site_id{suffix}": r["site_id"],
+                f"sensor_type{suffix}": sensor_type,
+                f"schema_version{suffix}": r.get("schema_version", "1.0"),
+                f"data{suffix}": json.dumps(r["data"], default=str),
+            })
+
+        # Flatten params into a single dict
+        flat_params: dict[str, Any] = {}
+        for p in params:
+            flat_params.update(p)
+
+        sql = (
+            f"INSERT INTO {tbl} (time, device_id, site_id, sensor_type, "
+            f"schema_version, data) VALUES "
+            + ", ".join(value_clauses)
+            + " ON CONFLICT (device_id, time) DO NOTHING"
+        )
+
+        with eng.begin() as conn:
+            result = conn.execute(text(sql), flat_params)
             total_inserted += result.rowcount
 
     logger.info(
@@ -348,6 +410,122 @@ def insert_readings_batch(
         len(readings),
     )
     return total_inserted
+
+
+# ── OI-15 — Backfill insert ────────────────────────────────────────────────
+
+
+def backfill_insert(
+    sensor_type: str,
+    readings: list[dict[str, Any]],
+    engine: Engine | None = None,
+) -> BackfillResult:
+    """Insert a chronological batch of backfill readings (idempotent).
+
+    Designed for the offline-buffer drain (OI-28 / FR7) and historical
+    data import scenarios.  Uses chunked multi-value INSERT with
+    ``ON CONFLICT DO NOTHING`` so replayed backfills never duplicate rows.
+
+    Each item in *readings* must contain:
+    ``device_id``, ``site_id``, ``time``, ``data``, and optionally
+    ``schema_version`` (defaults to ``"1.0"``).
+
+    Parameters
+    ----------
+    sensor_type : str
+        One of the 7 sensor families.
+    readings : list[dict]
+        Readings sorted chronologically (oldest-first).
+    engine : Engine, optional
+        Override the default engine.
+
+    Returns
+    -------
+    BackfillResult
+        Counts of total, inserted, and duplicate readings.
+
+    Raises
+    ------
+    ValueError
+        If *sensor_type* is not in :data:`~omniview.edge.topics.SENSOR_TYPES`.
+    """
+    result = BackfillResult(
+        total=len(readings),
+        sensor_type=sensor_type,
+    )
+
+    if not readings:
+        return result
+
+    if sensor_type not in SENSOR_TYPES:
+        raise ValueError(
+            f"Unknown sensor_type {sensor_type!r}. "
+            f"Must be one of: {sorted(SENSOR_TYPES)}"
+        )
+
+    eng = engine or get_engine()
+    tbl = _table_name(sensor_type)
+
+    logger.info(
+        "Backfill starting: %d %s readings → %s",
+        len(readings),
+        sensor_type,
+        tbl,
+    )
+
+    for chunk_idx, chunk in enumerate(_chunked(readings, _BACKFILL_CHUNK_SIZE)):
+        params: list[dict[str, Any]] = []
+        value_clauses: list[str] = []
+
+        for idx, r in enumerate(chunk):
+            suffix = f"_{idx}"
+            value_clauses.append(
+                f"(:time{suffix}, :device_id{suffix}, :site_id{suffix}, "
+                f":sensor_type{suffix}, :schema_version{suffix}, "
+                f"CAST(:data{suffix} AS jsonb))"
+            )
+            params.append({
+                f"time{suffix}": r["time"],
+                f"device_id{suffix}": r["device_id"],
+                f"site_id{suffix}": r["site_id"],
+                f"sensor_type{suffix}": sensor_type,
+                f"schema_version{suffix}": r.get("schema_version", "1.0"),
+                f"data{suffix}": json.dumps(r["data"], default=str),
+            })
+
+        flat_params: dict[str, Any] = {}
+        for p in params:
+            flat_params.update(p)
+
+        sql = (
+            f"INSERT INTO {tbl} (time, device_id, site_id, sensor_type, "
+            f"schema_version, data) VALUES "
+            + ", ".join(value_clauses)
+            + " ON CONFLICT (device_id, time) DO NOTHING"
+        )
+
+        with eng.begin() as conn:
+            db_result = conn.execute(text(sql), flat_params)
+            chunk_inserted = db_result.rowcount
+            result.inserted += chunk_inserted
+
+        logger.debug(
+            "Backfill chunk %d: %d/%d inserted",
+            chunk_idx,
+            chunk_inserted,
+            len(chunk),
+        )
+
+    result.duplicates = result.total - result.inserted
+
+    logger.info(
+        "Backfill complete for %s: %d total, %d inserted, %d duplicates",
+        tbl,
+        result.total,
+        result.inserted,
+        result.duplicates,
+    )
+    return result
 
 
 # ── Queries ─────────────────────────────────────────────────────────────────
@@ -398,6 +576,84 @@ def query_latest(
                  LIMIT :limit
             """),
             {"device_id": device_id, "limit": limit},
+        ).mappings().all()
+
+    return [dict(row) for row in rows]
+
+
+# ── OI-15 — Time-range query ───────────────────────────────────────────────
+
+
+def query_by_time_range(
+    sensor_type: str,
+    device_id: str,
+    start: datetime,
+    end: datetime,
+    limit: int = 10000,
+    engine: Engine | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch readings for a device within a time window.
+
+    Satisfies OI-15 acceptance criterion: *"queryable by device_id +
+    time range"*.  Used by the rule engine (OI-56) for rolling kVA
+    windows and by the dashboard for historical charts.
+
+    Parameters
+    ----------
+    sensor_type : str
+        One of the 7 sensor families.
+    device_id : str
+        Node identifier.
+    start : datetime
+        Inclusive lower bound of the time window.
+    end : datetime
+        Inclusive upper bound of the time window.
+    limit : int
+        Maximum rows returned (default 10 000, safety cap).
+    engine : Engine, optional
+        Override the default engine.
+
+    Returns
+    -------
+    list[dict]
+        Rows ordered by ``time ASC``.
+
+    Raises
+    ------
+    ValueError
+        If *sensor_type* is not recognised or *start* > *end*.
+    """
+    if sensor_type not in SENSOR_TYPES:
+        raise ValueError(
+            f"Unknown sensor_type {sensor_type!r}. "
+            f"Must be one of: {sorted(SENSOR_TYPES)}"
+        )
+    if start > end:
+        raise ValueError(
+            f"start ({start.isoformat()}) must be <= end ({end.isoformat()})"
+        )
+
+    eng = engine or get_engine()
+    tbl = _table_name(sensor_type)
+
+    with eng.connect() as conn:
+        rows = conn.execute(
+            text(f"""
+                SELECT time, device_id, site_id, sensor_type,
+                       schema_version, data
+                  FROM {tbl}
+                 WHERE device_id = :device_id
+                   AND time >= :start
+                   AND time <= :end
+                 ORDER BY time ASC
+                 LIMIT :limit
+            """),
+            {
+                "device_id": device_id,
+                "start": start,
+                "end": end,
+                "limit": limit,
+            },
         ).mappings().all()
 
     return [dict(row) for row in rows]

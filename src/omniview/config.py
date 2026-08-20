@@ -58,3 +58,22 @@ BUFFER_DB_PATH: str = os.getenv(
 BUFFER_MAX_AGE_DAYS: int = int(os.getenv("BUFFER_MAX_AGE_DAYS", "7"))
 BUFFER_MAX_SIZE_MB: int = int(os.getenv("BUFFER_MAX_SIZE_MB", "100"))
 BUFFER_DRAIN_BATCH_SIZE: int = int(os.getenv("BUFFER_DRAIN_BATCH_SIZE", "50"))
+
+# ── NTP drift guard (OI-53) ─────────────────────────────────────────────
+NTP_SERVER: str = os.getenv("NTP_SERVER", "pool.ntp.org")
+NTP_DRIFT_THRESHOLD_S: float = float(os.getenv("NTP_DRIFT_THRESHOLD_S", "5.0"))
+NTP_CHECK_INTERVAL_S: int = int(os.getenv("NTP_CHECK_INTERVAL_S", "60"))
+NTP_MAX_RETRIES: int = int(os.getenv("NTP_MAX_RETRIES", "3"))
+NTP_TIMEOUT_S: float = float(os.getenv("NTP_TIMEOUT_S", "5.0"))
+
+# ── Dashboard (OI-68) ───────────────────────────────────────────────────
+DASHBOARD_REFRESH_S: int = int(os.getenv("DASHBOARD_REFRESH_S", "30"))
+MD_PENALTY_RATE_PER_KVA: float = float(
+    os.getenv("MD_PENALTY_RATE_PER_KVA", "350.0")
+)
+IDLE_CURRENT_THRESHOLD_A: float = float(
+    os.getenv("IDLE_CURRENT_THRESHOLD_A", "10.0")
+)
+IDLE_TEMP_THRESHOLD_C: float = float(
+    os.getenv("IDLE_TEMP_THRESHOLD_C", "200.0")
+)

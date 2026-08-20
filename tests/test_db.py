@@ -205,17 +205,11 @@ class TestInsertReadingsBatch:
     def test_counts_inserted_rows(self, mock_get_engine: MagicMock) -> None:
         from omniview.ingest.db import insert_readings_batch
 
-        # Simulate 3 readings: 2 inserted, 1 duplicate
-        mock_results = [MagicMock(rowcount=1), MagicMock(rowcount=1), MagicMock(rowcount=0)]
-        call_idx = {"i": 0}
-
-        def execute_side_effect(*args, **kwargs):
-            r = mock_results[call_idx["i"]]
-            call_idx["i"] += 1
-            return r
-
+        # Multi-value INSERT: all 3 rows in one SQL call.
+        # Simulate 2 inserted, 1 duplicate (rowcount=2 from single execute).
+        mock_result = MagicMock(rowcount=2)
         mock_conn = MagicMock()
-        mock_conn.execute.side_effect = execute_side_effect
+        mock_conn.execute.return_value = mock_result
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_engine = MagicMock()

@@ -1,12 +1,12 @@
 ==============================================================
   CHINMAY WADETTIWAR — SPRINT 1 WORK SUMMARY FOR TECH LEAD
   OmniView IQ POC  |  DevC — Platform Units
-  Date: 11 August 2026
+  Date: 15 August 2026
 ==============================================================
 
 Hi,
 
-Here's a summary of what I've completed in Sprint 1 (4 tasks, ~6.0 SP),
+Here's a summary of what I've completed in Sprint 1 (7 tasks, ~10.0 SP),
 along with how to test/verify each piece.
 
 
@@ -218,11 +218,47 @@ HOW TO TEST:
   pytest tests/test_offline_buffer.py tests/test_mqtt_client.py -v
 
 
+--------------------------------------------------------------
+7. OI-15 — TIME-SERIES DATABASE INSERTION LOGIC (IDEMPOTENT)  (1.0 SP)
+--------------------------------------------------------------
+
+WHAT I DID:
+- Extended the OI-54 TSDB foundation with production-grade idempotent
+  backfill insertion logic:
+  * backfill_insert() — chronological batch insert with chunked multi-value
+    INSERT (100 rows/chunk), ON CONFLICT DO NOTHING, returns BackfillResult
+    dataclass (total/inserted/duplicates counts)
+  * query_by_time_range() — fetch readings for device_id within a [start, end]
+    time window, ordered ASC. Satisfies AC: "queryable by device_id + time range"
+  * TSDBInserter — high-level facade class with per-sensor-family metrics
+    tracking (inserts, duplicates, errors), thread-safe
+  * Refactored insert_readings_batch() from row-by-row to multi-value INSERT
+- 27 new unit tests covering all 7 sensor families, backfill idempotency,
+  time-range queries, chunking, metrics isolation
+- 5 files created/modified
+
+HOW TO TEST:
+  # Unit tests (no Docker required)
+  pytest tests/test_tsdb_inserter.py -v   # 27 tests
+  pytest tests/ -v                        # Full suite: 134/134 pass
+
+  # Quick Python verification
+  python -c "from omniview.ingest import TSDBInserter, backfill_insert, query_by_time_range, BackfillResult; print('OI-15 imports OK')"
+
+  # Live backfill test (needs Docker running)
+  # 1. Start infra + run migrations + start subscriber (Terminal 1)
+  # 2. Inject 50 readings with burst mode (Terminal 2)
+  python -m omniview.edge.injector --synthetic --burst --max 50
+  # 3. Re-run the same injection
+  python -m omniview.edge.injector --synthetic --burst --max 50
+  # Subscriber should show: duplicates=50 on second run (idempotent!)
+
+
 ==============================================================
-  END-TO-END PIPELINE TEST (ALL 6 TASKS TOGETHER)
+  END-TO-END PIPELINE TEST (ALL 7 TASKS TOGETHER)
 ==============================================================
 
-This is the full Day-1 demo flow. Tests OI-41 + OI-51 + OI-54 + OI-12:
+This is the full Day-1 demo flow. Tests OI-41 + OI-51 + OI-54 + OI-12 + OI-14 + OI-28 + OI-15:
 
   # 1. Start infrastructure
   docker compose up -d
@@ -240,33 +276,38 @@ This is the full Day-1 demo flow. Tests OI-41 + OI-51 + OI-54 + OI-12:
   # 5. Check subscriber output
   # Should show: received=20, inserted=20, duplicates=0, errors=0
   
-  # 6. Verify data in database (Terminal 3)
+  # 6. Re-run same injection (idempotency test)
+  python -m omniview.edge.injector --synthetic --max 20
+  # Should show: received=20, inserted=0, duplicates=20 (OI-15!)
+  
+  # 7. Verify data in database (Terminal 3)
   # Use psql or any Postgres client:
   # psql postgresql://omniview:omniview@localhost:5432/omniview
   # SELECT count(*) FROM readings_electrical;
-  # Expected: 20
+  # Expected: 20 (not 40 — duplicates were dropped)
   # SELECT device_id, time, data->>'kva' as kva FROM readings_electrical LIMIT 5;
   
-  # 7. Run full unit test suite
+  # 8. Run full unit test suite
   pytest tests/ -v
-  # Expected: 79/79 passed
+  # Expected: 134/134 passed
 
 
 ==============================================================
   OVERALL STATUS
 ==============================================================
 
-Tasks Completed:  6/6 (OI-41, OI-51, OI-54, OI-12, OI-14, OI-28)
-Story Points:     9.0 SP
-Total Tests:      98 (all passing, 0 regressions)
-Files Changed:    ~40 (new + modified)
+Tasks Completed:  7/7 (OI-41, OI-51, OI-54, OI-12, OI-14, OI-28, OI-15)
+Story Points:     10.0 SP
+Total Tests:      134 (all passing, 0 regressions)
+Files Changed:    ~45 (new + modified)
 Branch:           chinmay
 Key Commits:      d64cd65 (scaffold), + subsequent commits
 
 What's unblocked next:
-  - OI-55: Day-1 seed script
-  - OI-68: Live dashboard (data is now in TSDB)
+  - OI-55: Day-1 seed script (uses backfill_insert)
+  - OI-68: Live dashboard (uses query_by_time_range)
   - OI-29: MD breach prediction alert
+  - OI-56: Rolling 15-min kVA rule (uses query_by_time_range)
 
 Blockers:
   - DevB schemas (OI-23, OI-5/6/7) not yet delivered — using synthetic data (Tracked in DevB_Schema_Integration_Checklist.md)

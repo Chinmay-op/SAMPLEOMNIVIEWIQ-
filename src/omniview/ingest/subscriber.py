@@ -59,6 +59,7 @@ _stats = {
     "errors": 0,
     "skipped_system": 0,
     "validation_failures": 0,
+    "backfill_insertions": 0,  # OI-29: replayed messages from offline buffer
 }
 _stats_lock = threading.Lock()
 
@@ -162,6 +163,10 @@ def _on_sensor_message(topic: str, payload: dict[str, Any]) -> None:
         with _stats_lock:
             if inserted:
                 _stats["inserted"] += 1
+                # OI-29: detect backfill replays (timestamp > 60s behind now)
+                age = (datetime.now(timezone.utc) - ts).total_seconds()
+                if age > 60:
+                    _stats["backfill_insertions"] += 1
             else:
                 _stats["duplicates"] += 1
     except Exception:
@@ -211,13 +216,15 @@ def run_subscriber(site_id: str | None = None) -> None:
             stats = get_stats()
             logger.info(
                 "Subscriber stats: received=%d inserted=%d "
-                "duplicates=%d errors=%d skipped=%d validation_failures=%d",
+                "duplicates=%d errors=%d skipped=%d "
+                "validation_failures=%d backfill=%d",
                 stats["received"],
                 stats["inserted"],
                 stats["duplicates"],
                 stats["errors"],
                 stats["skipped_system"],
                 stats["validation_failures"],
+                stats["backfill_insertions"],
             )
 
     logger.info("Subscriber stopped. Final stats: %s", get_stats())

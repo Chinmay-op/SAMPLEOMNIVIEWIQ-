@@ -2,7 +2,7 @@
 
 **Developer:** Chinmay Wadettiwar (DevC — Platform / Edge / Cloud / UI)  
 **Sprint:** OI Sprint 1  
-**Date Range:** 5 Aug – 10 Aug 2026  
+**Date Range:** 5 Aug – 15 Aug 2026  
 **Branch:** `chinmay`
 
 ---
@@ -130,16 +130,35 @@ Implemented FR7 from the PRD. Added an offline storage buffer (`offline_buffer.p
 
 ---
 
+## OI-15 — Time-Series Database Insertion Logic, Idempotent (1.0 SP)
+
+### What We Did
+Extended the OI-54 foundation with production-grade idempotent insertion logic for chronological backfill. Added `backfill_insert()` with chunked multi-value INSERT, `query_by_time_range()` for the rule engine and dashboard, `BackfillResult` dataclass for structured return types, and a `TSDBInserter` facade class with per-sensor-family metrics tracking. Refactored `insert_readings_batch()` from row-by-row to multi-value INSERT.
+
+### Decisions
+
+| # | Decision | Reasoning |
+|---|----------|-----------|
+| 1 | **Chunked multi-value INSERT (100 rows/chunk)** | Single SQL statement per chunk reduces round-trips vs row-by-row. 100 is a safe default — PostgreSQL handles it well without exceeding the ~32K parameter limit. Performance tested with 250-row batches (3 chunks). |
+| 2 | **`BackfillResult` dataclass** | Structured return gives callers full visibility (total/inserted/duplicates) vs just a count. The `.is_clean` property is useful for monitoring/alerting — e.g. the offline buffer drain (OI-28) can verify no data was silently lost. |
+| 3 | **Separate `backfill_insert()` from `insert_readings_batch()`** | `backfill_insert` is designed for the offline buffer drain scenario (returns `BackfillResult`, logs progress). `insert_readings_batch` is a simpler general-purpose batch API (returns `int`). Different consumers need different interfaces. |
+| 4 | **`query_by_time_range()` returns ASC order** | Rule engine (OI-56) needs chronological order for rolling kVA windows. Dashboard needs it for time-series charts. ASC is the natural reading order. |
+| 5 | **`TSDBInserter` facade class** | Clean API for subscriber and future consumers. Per-family metrics tracking makes observability trivial. Thread-safe via `threading.Lock` for concurrent ingest. |
+| 6 | **`start > end` raises ValueError** | Fail fast on inverted ranges rather than silently returning empty results. Helps catch bugs in rule engine window arithmetic early. |
+| 7 | **Safety cap of 10,000 rows on time-range queries** | Prevents accidental full-table scans from consuming memory. Callers needing more rows should paginate. |
+
+---
+
 ## Cross-Cutting Decisions (All Tasks)
 
 | Decision | Reasoning |
 |----------|-----------|
 | **All stubs include Jira ticket references** | Any team member reading the code knows exactly which ticket owns that module. Reduces context-switching. |
-| **Unit tests for every module** | 79 total tests (28 injector + 20 db/subscriber + 31 topics/mqtt_client). Every new module ships with tests. CI green gate. |
+| **Unit tests for every module** | 134 total tests (27 OI-15 + 28 injector + 20 db/subscriber + 31 topics/mqtt_client + others). Every new module ships with tests. CI green gate. |
 | **Python logging (no `print()`)** | Structured, level-filtered logging. Production can set `WARNING`, development uses `DEBUG`. No print-statement cleanup needed later. |
-| **Everything importable from package root** | `from omniview.edge import ElectricalInjector` works. Clean public API via `__init__.py` exports. |
+| **Everything importable from package root** | `from omniview.ingest import TSDBInserter, backfill_insert` works. Clean public API via `__init__.py` exports. |
 | **Config via `.env` + `config.py`** | 12-factor app pattern. Environment-specific values (broker host, TSDB password) stay in `.env`, defaults in `config.py`. No hardcoded connection strings. |
 
 ---
 
-*Last updated: 11 August 2026*
+*Last updated: 15 August 2026*

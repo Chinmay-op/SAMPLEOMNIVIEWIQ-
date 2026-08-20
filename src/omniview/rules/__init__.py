@@ -4,6 +4,9 @@ omniview.rules — Rule Engine & Intelligence Layer (Layers 3–4)
 
 Owned by Lead (Dnyandev). Package scaffolded here so cross-imports resolve.
 
+Shipped modules:
+* Action-card generator from rule/PdM events        (OI-69)
+
 Future modules (Lead track):
 * Rolling 15-min kVA + MD trajectory alert  (OI-56)
 * Lazy-idle detection heuristic             (OI-57)
@@ -12,3 +15,15 @@ Future modules (Lead track):
 * Conflict arbitration (safety > compliance > cost)  (OI-60)
 * PdM Stage 0/A — HI batch + CUSUM          (OI-62–67)
 """
+
+from omniview.rules.action_cards import (
+    ActionCard,
+    ActionCardGenerator,
+    CARD_TEMPLATES,
+)
+
+__all__ = [
+    "ActionCard",
+    "ActionCardGenerator",
+    "CARD_TEMPLATES",
+]
