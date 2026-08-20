@@ -5,6 +5,7 @@ import random
 import datetime
 import csv
 from pathlib import Path
+from omniview.config import CALIBRATION_CURRENT_OFFSET_A
 
 try:
     import jsonschema
@@ -40,7 +41,7 @@ def generate_reading(is_anomaly: bool = False) -> dict:
     global cumulative_kwh
 
     voltage_ll = 415.0 + random.uniform(-2, 2)
-    current_avg = 200.0 + random.uniform(-10, 10)
+    current_avg = 200.0 + random.uniform(-10, 10) + CALIBRATION_CURRENT_OFFSET_A
     pf_avg = 0.95 + random.uniform(-0.02, 0.02)
 
     if is_anomaly:
@@ -142,7 +143,7 @@ def cast_or_default(value, cast_type, default=0.0):
 def map_csv_row_to_payload(row):
     """Maps a row from CSV to the strict Selec MFM384 schema structure."""
     voltage_ll = cast_or_default(row.get("voltage_v_ll_avg", 415.0), float)
-    current = cast_or_default(row.get("current_a_avg", 200.0), float)
+    current = cast_or_default(row.get("current_a_avg", 200.0), float) + CALIBRATION_CURRENT_OFFSET_A
     pf = cast_or_default(row.get("power_factor_avg", 0.95), float)
     kw = cast_or_default(row.get("active_power_kw_total"), float, default=(voltage_ll * current * pf * 1.732) / 1000)
     kva = cast_or_default(row.get("apparent_power_kva_total"), float, default=(voltage_ll * current * 1.732) / 1000)

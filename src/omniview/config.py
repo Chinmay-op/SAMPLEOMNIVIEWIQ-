@@ -58,3 +58,7 @@ BUFFER_DB_PATH: str = os.getenv(
 BUFFER_MAX_AGE_DAYS: int = int(os.getenv("BUFFER_MAX_AGE_DAYS", "7"))
 BUFFER_MAX_SIZE_MB: int = int(os.getenv("BUFFER_MAX_SIZE_MB", "100"))
 BUFFER_DRAIN_BATCH_SIZE: int = int(os.getenv("BUFFER_DRAIN_BATCH_SIZE", "50"))
+
+# ── Calibration ────────────────────────────────────────────────────────────
+# OI-40 Calibration cross-check offsets (e.g. clamp-meter vs MFM384)
+CALIBRATION_CURRENT_OFFSET_A: float = float(os.getenv("CALIBRATION_CURRENT_OFFSET_A", "0.0"))
