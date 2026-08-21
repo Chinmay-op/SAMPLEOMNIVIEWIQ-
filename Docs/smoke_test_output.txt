@@ -1,0 +1,127 @@
+﻿.venv\Scripts\python.exe : ALERT ROUTED [LOG] {"alert_routing": "LOG", "card_id": "5a85faf3fbdd", "severity": 
+"CRITICAL", "event_type": "md_nearmiss", "device_id": "pune-comp-mfm384", "target_role": "plant_manager", "title": 
+"\u26a1 MD Near-Miss \u2014 Demand Approaching Contract Limit", "timestamp": "2026-08-21T10:30:00+05:30"}
+At line:1 char:1
++ .venv\Scripts\python.exe Docs\smoke_test_oi71_oi72.py 2>&1 | Out-File ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ALERT ROUTED [L...0:30:00+05:30"}:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ALERT ROUTED [LOG] {"alert_routing": "LOG", "card_id": "86c3020d59a2", "severity": "CRITICAL", "event_type": 
+"critical_vibration", "device_id": "pune-comp-vib01", "target_role": "plant_manager", "title": "\ud83d\udd34 Critical 
+Vibration \u2014 Compressor Bearing at Risk", "timestamp": "2026-08-21T11:30:00+05:30"}
+
+======================================================================
+  OI-71: ALERT ROUTING STUB
+======================================================================
+
+≡ƒôï ROUTING TABLE (documented contract):
+
+| Severity | Target Role | Channels | Description |
+|----------|-------------|----------|-------------|
+| CRITICAL | plant_manager | webhook, log | MD near-miss / critical vibration ΓåÆ push alert to plant manager |
+| CRITICAL | operator | webhook, log | Immediate floor action (breakdown / safety) ΓåÆ push to operator display |
+| CRITICAL | maintenance_engineer | webhook, email, log | Critical equipment failure ΓåÆ push + email to maintenance |
+| WARNING | maintenance_engineer | email, log | Lazy-idle / leak / HI decline ΓåÆ email maintenance for scheduled action |
+| WARNING | plant_manager | email, log | Demand trending up / cost warning ΓåÆ email plant manager |
+| WARNING | operator | log | Floor-level warning ΓåÆ log only (operator sees dashboard) |
+| INFO | plant_manager | log | Informational update ΓåÆ log only |
+| INFO | maintenance_engineer | log | Informational update ΓåÆ log only |
+| INFO | operator | log | Informational update ΓåÆ log only |
+
+Γ£à Generated 5 action cards from 5 event types
+
+≡ƒôí Routed 5 cards ΓåÆ 10 dispatches:
+
+  Γ£à ≡ƒîÉ WEBHOOK  ΓåÆ plant_manager             | Webhook stub ΓåÆ POST http://localhost:9999/alerts (CRITICAL m
+  Γ£à ≡ƒô¥ LOG      ΓåÆ plant_manager             | Logged: CRITICAL md_nearmiss ΓåÆ plant_manager
+  Γ£à ≡ƒôº EMAIL    ΓåÆ maintenance_engineer      | Email stub ΓåÆ maintenance@example.com: [OmniView IQ] [WARNING
+  Γ£à ≡ƒô¥ LOG      ΓåÆ maintenance_engineer      | Logged: WARNING lazy_idle ΓåÆ maintenance_engineer
+  Γ£à ≡ƒôº EMAIL    ΓåÆ maintenance_engineer      | Email stub ΓåÆ maintenance@example.com: [OmniView IQ] [WARNING
+  Γ£à ≡ƒô¥ LOG      ΓåÆ maintenance_engineer      | Logged: WARNING leak_proxy ΓåÆ maintenance_engineer
+  Γ£à ≡ƒîÉ WEBHOOK  ΓåÆ plant_manager             | Webhook stub ΓåÆ POST http://localhost:9999/alerts (CRITICAL c
+  Γ£à ≡ƒô¥ LOG      ΓåÆ plant_manager             | Logged: CRITICAL critical_vibration ΓåÆ plant_manager
+  Γ£à ≡ƒôº EMAIL    ΓåÆ maintenance_engineer      | Email stub ΓåÆ maintenance@example.com: [OmniView IQ] [WARNING
+  Γ£à ≡ƒô¥ LOG      ΓåÆ maintenance_engineer      | Logged: WARNING maintenance_risk ΓåÆ maintenance_engineer
+
+  Summary: 2 webhook, 3 email, 5 log dispatches
+
+======================================================================
+  OI-72: JUMBO DISPLAY MODBUS REGISTER FEED
+======================================================================
+
+≡ƒô║ REGISTER MAP (what the jumbo display reads):
+
+| Address | Name | Type | Unit | Dashboard Source |
+|---------|------|------|------|-----------------|
+| 0ΓÇô1 | live_kva | FLOAT32 | kVA | `get_latest_kva()` |
+| 2ΓÇô3 | contract_kva | FLOAT32 | kVA | `config.CONTRACTED_DEMAND_KVA` |
+| 4ΓÇô5 | md_proximity_pct | FLOAT32 | % | `get_latest_kva()` |
+| 6ΓÇô7 | penalty_avoided_inr | FLOAT32 | Γé╣ | `get_penalty_avoided()` |
+| 8ΓÇô9 | idle_load_pct | FLOAT32 | % | `get_idle_load_percent()` |
+| 10 | warning_count | UINT16 | count | `get_alerts()` |
+| 11 | critical_count | UINT16 | count | `get_alerts()` |
+| 12 | active_severity | UINT16 | enum | 0=NONE 1=INFO 2=WARNING 3=CRITICAL |
+| 13 | heartbeat | UINT16 | counter | Incrementing (proves feed alive) |
+| 14ΓÇô15 | peak_kva_24h | FLOAT32 | kVA | `get_peak_kva_24h()` |
+
+≡ƒôè REGISTER BANK SNAPSHOT (after update):
+
+  Addr  Name                         Value       Hex
+  ΓöÇΓöÇΓöÇΓöÇ  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+     0  live_kva (H)                 17391  0x43EF
+     1  live_kva (L)                 16384  0x4000
+     2  contract_kva (H)             17402  0x43FA
+     3  contract_kva (L)                 0  0x0000
+     4  md_proximity (H)             17087  0x42BF
+     5  md_proximity (L)             26214  0x6666
+     6  penalty_avoided (H)          17899  0x45EB
+     7  penalty_avoided (L)          10240  0x2800
+     8  idle_load_pct (H)            16708  0x4144
+     9  idle_load_pct (L)            52429  0xCCCD
+    10  warning_count                    2  0x0002
+    11  critical_count                   1  0x0001
+    12  active_severity                  3  0x0003
+    13  heartbeat                        1  0x0001
+    14  peak_kva_24h (H)             17393  0x43F1
+    15  peak_kva_24h (L)              3277  0x0CCD
+
+≡ƒöó DECODED VALUES (same as dashboard):
+
+  ΓÜí Live kVA:           478.5 / 500
+  ≡ƒôè MD Proximity:       95.7%
+  ≡ƒÆ░ Penalty Avoided:    Γé╣7,525
+  ≡ƒöÑ Idle Load:          12.3%
+  ≡ƒƒí Warning Count:      2
+  ≡ƒö┤ Critical Count:     1
+  ≡ƒÜ¿ Active Severity:    CRITICAL
+  ≡ƒÆô Heartbeat:          1
+  ≡ƒôê Peak kVA (24h):     482.1
+
+≡ƒöä DRIFT CHECK:
+
+  Drifted:      Γ£à NO
+  Max drift:    0.0000%
+  Tolerance:    0.1%
+  Fields checked: 9
+
+======================================================================
+  SUMMARY ΓÇö READY TO PUSH Γ£à
+======================================================================
+
+  OI-71 Alert Routing:
+    Γ£à Routing table: 9 rules
+    Γ£à Channel stubs: Log, Email, Webhook
+    Γ£à Dispatched 10 alerts from 5 cards
+
+  OI-72 Jumbo Display:
+    Γ£à Register bank: 16 holding registers
+    Γ£à Float encoding: IEEE 754 FLOAT32
+    Γ£à Drift check: PASS
+    Γ£à Same source of truth as dashboard
+
+  Tests:
+    Γ£à 56 alert router tests
+    Γ£à 37 jumbo display tests
+    Γ£à 464 total regression tests
+

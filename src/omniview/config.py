@@ -77,3 +77,16 @@ IDLE_CURRENT_THRESHOLD_A: float = float(
 IDLE_TEMP_THRESHOLD_C: float = float(
     os.getenv("IDLE_TEMP_THRESHOLD_C", "200.0")
 )
+
+# ── Alert Routing (OI-71) ───────────────────────────────────────────
+ALERT_ROUTING_ENABLED: bool = os.getenv("ALERT_ROUTING_ENABLED", "true").lower() in (
+    "true", "1", "yes",
+)
+ALERT_WEBHOOK_URL: str = os.getenv(
+    "ALERT_WEBHOOK_URL", "http://localhost:9999/alerts"
+)
+# JSON map of role → email address (override via .env)
+_EMAIL_MAP_RAW: str = os.getenv("ALERT_EMAIL_RECIPIENT_MAP", "")
+ALERT_EMAIL_RECIPIENT_MAP: dict[str, str] = (
+    __import__("json").loads(_EMAIL_MAP_RAW) if _EMAIL_MAP_RAW else {}
+)

@@ -1,0 +1,45 @@
+﻿........................................................................ [ 15%]
+........................................................................ [ 31%]
+........................................................................ [ 46%]
+........................................................................ [ 62%]
+........................................................................ [ 77%]
+........................................................................ [ 93%]
+................................                                         [100%]
+============================== warnings summary ===============================
+tests/test_bots.py: 2 warnings
+tests/test_seed.py: 43684 warnings
+  D:\OmniView iq\omniview-iq-poc\src\omniview\edge\bots\electrical_bot.py:60: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+
+tests/test_bots.py: 2 warnings
+tests/test_seed.py: 1680 warnings
+  D:\OmniView iq\omniview-iq-poc\src\omniview\edge\bots\vibration_bot.py:59: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+
+tests/test_bots.py: 2 warnings
+tests/test_seed.py: 3120 warnings
+  D:\OmniView iq\omniview-iq-poc\src\omniview\edge\bots\thermal_bot.py:77: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+
+tests/test_bots.py: 2 warnings
+tests/test_seed.py: 3000 warnings
+  D:\OmniView iq\omniview-iq-poc\src\omniview\edge\bots\pressure_bot.py:68: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+
+tests/test_bots.py: 2 warnings
+tests/test_seed.py: 1560 warnings
+  D:\OmniView iq\omniview-iq-poc\src\omniview\edge\bots\gas_bot.py:57: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+
+tests/test_bots.py: 2 warnings
+tests/test_seed.py: 6240 warnings
+  D:\OmniView iq\omniview-iq-poc\src\omniview\edge\bots\stroke_bot.py:57: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+
+tests/test_bots.py: 1 warning
+tests/test_seed.py: 1565 warnings
+  D:\OmniView iq\omniview-iq-poc\src\omniview\edge\bots\ambient_bot.py:41: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+464 passed, 60862 warnings in 6.64s

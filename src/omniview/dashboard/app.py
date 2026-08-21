@@ -355,6 +355,153 @@ except Exception as e:
     st.markdown('<p class="section-header">🎯 Action Cards</p>', unsafe_allow_html=True)
     st.error(f"Could not load action cards: {e}")
     logger.error("Action cards error: %s", e)
+    action_cards = []
+
+# ── Alert Routing Log (OI-71) ───────────────────────────────────────
+
+st.divider()
+
+try:
+    from omniview.config import ALERT_ROUTING_ENABLED, ALERT_WEBHOOK_URL
+    from omniview.dashboard.alert_router import AlertRouter
+
+    st.markdown(
+        '<p class="section-header">🔔 Alert Routing Log</p>',
+        unsafe_allow_html=True,
+    )
+
+    if not ALERT_ROUTING_ENABLED:
+        st.info("Alert routing is disabled (set ALERT_ROUTING_ENABLED=true in .env)")
+    elif not action_cards:
+        st.info(
+            "No alerts to route. Routing activates when action cards "
+            "are generated from rule/PdM events."
+        )
+    else:
+        router = AlertRouter(
+            enabled=ALERT_ROUTING_ENABLED,
+            webhook_url=ALERT_WEBHOOK_URL,
+        )
+        routing_results = router.route_batch(action_cards)
+
+        if routing_results:
+            # Summary row
+            rcol1, rcol2, rcol3, rcol4 = st.columns(4)
+            with rcol1:
+                st.metric("Total Dispatches", len(routing_results))
+            with rcol2:
+                webhook_count = sum(
+                    1 for r in routing_results if r.channel.value == "webhook"
+                )
+                st.metric("🌐 Webhook", webhook_count)
+            with rcol3:
+                email_count = sum(
+                    1 for r in routing_results if r.channel.value == "email"
+                )
+                st.metric("📧 Email", email_count)
+            with rcol4:
+                log_count = sum(
+                    1 for r in routing_results if r.channel.value == "log"
+                )
+                st.metric("📝 Log", log_count)
+
+
+            routing_data = []
+            for r in routing_results:
+                channel_icons = {
+                    "webhook": "🌐", "email": "📧", "log": "📝",
+                    "sms": "📱", "cmms": "🎫",
+                }
+                routing_data.append({
+                    "Time": r.timestamp.strftime("%H:%M:%S"),
+                    "Channel": f"{channel_icons.get(r.channel.value, '📤')} {r.channel.value.upper()}",
+                    "Target": r.target_role.replace("_", " ").title(),
+                    "Status": "✅" if r.status == "sent" else "❌",
+                    "Detail": r.detail[:80],
+                })
+
+            st.dataframe(
+                pd.DataFrame(routing_data),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("No routing dispatches yet.")
+
+except Exception as e:
+    st.markdown(
+        '<p class="section-header">🔔 Alert Routing Log</p>',
+        unsafe_allow_html=True,
+    )
+    st.error(f"Could not load routing log: {e}")
+    logger.error("Alert routing log error: %s", e)
+
+# ── Jumbo Floor Display (OI-72) ─────────────────────────────────────
+
+st.divider()
+
+try:
+    from omniview.dashboard.jumbo_display import JumboDisplayFeed
+
+    st.markdown(
+        '<p class="section-header">📺 Jumbo Floor Display — Register Feed</p>',
+        unsafe_allow_html=True,
+    )
+
+    feed = JumboDisplayFeed(data_source="mock")
+    snapshot = feed.update()
+    drift = feed.check_drift()
+
+    # Display key values as the operator would see them
+    jcol1, jcol2, jcol3, jcol4 = st.columns(4)
+    with jcol1:
+        st.metric(
+            "⚡ Live kVA",
+            f"{snapshot.live_kva:.1f}",
+            delta=f"{snapshot.md_proximity_pct:.0f}% of contract",
+            delta_color="inverse",
+        )
+    with jcol2:
+        sev_labels = {0: "✅ None", 1: "🔵 Info", 2: "🟡 Warning", 3: "🔴 Critical"}
+        st.metric("🚨 Severity", sev_labels.get(snapshot.active_severity, "—"))
+    with jcol3:
+        st.metric("🟡 Warnings", snapshot.warning_count)
+    with jcol4:
+        drift_label = "✅ Synced" if not drift.drifted else f"⚠️ Drift {drift.max_drift_pct:.2f}%"
+        st.metric("🔄 Drift Check", drift_label)
+
+    with st.expander("📋 Register Bank (16 holding registers)"):
+        reg_data = []
+        reg_names = {
+            0: "live_kva (H)", 1: "live_kva (L)",
+            2: "contract_kva (H)", 3: "contract_kva (L)",
+            4: "md_proximity (H)", 5: "md_proximity (L)",
+            6: "penalty_avoided (H)", 7: "penalty_avoided (L)",
+            8: "idle_load_pct (H)", 9: "idle_load_pct (L)",
+            10: "warning_count", 11: "critical_count",
+            12: "active_severity", 13: "heartbeat",
+            14: "peak_kva_24h (H)", 15: "peak_kva_24h (L)",
+        }
+        for addr in range(16):
+            reg_data.append({
+                "Addr": addr,
+                "Name": reg_names.get(addr, "—"),
+                "Value": snapshot.registers.get(addr, 0),
+                "Hex": f"0x{snapshot.registers.get(addr, 0):04X}",
+            })
+        st.dataframe(
+            pd.DataFrame(reg_data),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+except Exception as e:
+    st.markdown(
+        '<p class="section-header">📺 Jumbo Floor Display</p>',
+        unsafe_allow_html=True,
+    )
+    st.error(f"Could not load jumbo display: {e}")
+    logger.error("Jumbo display error: %s", e)
 
 
 # ── Footer ───────────────────────────────────────────────────────────
