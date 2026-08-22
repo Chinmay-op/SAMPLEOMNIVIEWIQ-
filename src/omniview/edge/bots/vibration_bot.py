@@ -3,6 +3,10 @@ import time
 import random
 import datetime
 from pathlib import Path
+import sys
+from omniview.edge.bots.stochastic import wanderer, PoissonTimer
+
+sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 try:
     import jsonschema
@@ -28,46 +32,101 @@ def validate_payload(payload):
         except jsonschema.exceptions.ValidationError as e:
             print(f"Schema Validation Error: {e.message}")
 
-
 def classify_iso_zone(z_rms_velocity: float) -> str:
     if z_rms_velocity <= 2.8:   return "ZONE_A"
     elif z_rms_velocity <= 7.1: return "ZONE_B"
     elif z_rms_velocity <= 18.0: return "ZONE_C"
     else:                        return "ZONE_D"
 
+def _read_edge_state() -> dict:
+    state_file = Path(".edge_state.json")
+    if state_file.exists():
+        try:
+            with open(state_file, 'r') as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
 
-def generate_reading(is_anomaly: bool = False) -> dict:
-    if is_anomaly:
-        z_rms = random.uniform(7.5, 18.5)
-        x_rms = random.uniform(5.0, 12.0)
-        z_peak = random.uniform(1.5, 3.0)
-        x_peak = random.uniform(1.0, 2.5)
-        hf_rms = random.uniform(1.5, 4.0)
-        temp_c = random.uniform(38.0, 58.0) + 15.0
+# Live State
+bearing_wear_wander = 0.0
+next_anomaly_time = 0.0
+anomaly_active_until = 0.0
+
+def get_poisson_bearing_defect():
+    """Poisson timer for bearing degradation."""
+    global next_anomaly_time, anomaly_active_until
+    now = time.time()
+    if now < anomaly_active_until:
+        return True 
+    if next_anomaly_time == 0.0:
+        next_anomaly_time = now + random.expovariate(1.0 / 86400.0) # Mean: 24 hours
+        return False
+    if now >= next_anomaly_time:
+        next_anomaly_time = now + random.expovariate(1.0 / 86400.0)
+        anomaly_active_until = now + random.uniform(1800, 7200) # Lasts 30 mins to 2 hours
+        return True
+    return False
+
+def generate_reading() -> dict:
+    global bearing_wear_wander
+
+    edge_state = _read_edge_state()
+    machine_running = edge_state.get("machine_running", True)
+    compressor_running = edge_state.get("compressor_running", 0) == 1
+    ambient_temp = edge_state.get("ambient_temp_c", 25.0)
+    
+    is_bearing_defect = get_poisson_bearing_defect()
+
+    if not machine_running:
+        # Machine is off. Only tiny floor vibrations exist.
+        z_rms = 0.2 + wanderer.get('vib_z_off', 0.1, 0.05)
+        x_rms = 0.1 + wanderer.get('vib_x_off', 0.1, 0.02)
+        z_peak = z_rms * 1.5
+        x_peak = x_rms * 1.5
+        hf_rms = z_rms * 0.1
+        temp_c = ambient_temp
+        z_kurtosis = 3.0 + wanderer.get('kurt_noise', 0.2, 0.1)
+        x_kurtosis = 3.0 + wanderer.get('kurt_noise', 0.2, 0.1)
+        peak_freq = 0.0
     else:
-        z_rms = random.uniform(1.0, 2.8)
-        x_rms = random.uniform(0.8, 2.0)
-        z_peak = random.uniform(0.1, 0.5)
-        x_peak = random.uniform(0.08, 0.4)
-        hf_rms = random.uniform(0.1, 0.5)
-        temp_c = random.uniform(38.0, 58.0)
+        # --- Live Mechanical Physics (AR1) ---
+        theta_v = 0.02
+        sigma_v = 0.15
+        bearing_wear_wander = (1 - theta_v) * bearing_wear_wander + random.gauss(0, sigma_v)
+
+        # Base running vibration
+        base_rms = 1.5 + bearing_wear_wander
+        
+        # If the compressor kicks on, it adds massive shake to the chassis
+        if compressor_running:
+            base_rms += 2.5 + wanderer.get('comp_noise', 0.2, 0.5)
+
+        if is_bearing_defect:
+            # Defect state: Kurtosis spikes massively as a leading indicator, RMS increases moderately
+            z_rms = base_rms + wanderer.get('z_defect', 0.1, 1.0) + 4.0
+            z_peak = wanderer.get('z_peak_defect', 0.1, 2.0) + 11.5 # Spiky impacts
+            hf_rms = wanderer.get('hf_defect', 0.1, 0.8) + 3.75
+            temp_c = ambient_temp + 15.0 + wanderer.get('temp_defect', 0.05, 1.5) + 7.5 # Friction heat
+            z_kurtosis = wanderer.get('z_peak_defect', 0.1, 2.0) + 11.5 # Massive Kurtosis spike
+            peak_freq = 200.0 + wanderer.get('freq_defect', 0.1, 30.0) # High frequency defect
+        else:
+            # Normal healthy running
+            z_rms = max(0.5, base_rms)
+            z_peak = z_rms * 1.5 + wanderer.get('crest_noise', 0.2, 0.1)
+            hf_rms = z_rms * 0.15
+            temp_c = ambient_temp + 12.0 + wanderer.get('temp_noise', 0.1, 1.0)
+            z_kurtosis = 3.0 + wanderer.get('kurt2', 0.1, 0.2) # Gaussian normal
+            peak_freq = 37.5 + wanderer.get('freq_norm', 0.1, 5.0) # 1x-2x running speed
+
+        x_rms = z_rms * 0.7 + wanderer.get('kurt_noise', 0.2, 0.1)
+        x_peak = z_peak * 0.7 + wanderer.get('kurt_noise', 0.2, 0.1)
+        x_kurtosis = z_kurtosis * 0.85 + wanderer.get('kurt_noise', 0.2, 0.1)
 
     zone = classify_iso_zone(z_rms)
 
-    # --- Kurtosis: derived from ISO zone (Gaussian=3.0, fault=8+) ---
-    zone_kurtosis_map = {"ZONE_A": 3.0, "ZONE_B": 4.0, "ZONE_C": 6.0, "ZONE_D": 8.5}
-    z_kurtosis = zone_kurtosis_map[zone] + random.uniform(-0.3, 0.3)
-    x_kurtosis = z_kurtosis * 0.85 + random.uniform(-0.2, 0.2)
-
-    # --- Crest factor: peak / RMS (direct computation) ---
-    z_crest = round(z_peak / hf_rms, 2) if hf_rms > 0 else 3.0
-    x_crest = round(x_peak / max(0.01, x_rms * 0.05), 2) if x_rms > 0 else 3.0
-
-    # --- Peak velocity frequency: healthy=running speed, fault=bearing defect ---
-    if zone in ["ZONE_A", "ZONE_B"]:
-        peak_freq = random.uniform(25.0, 50.0)  # 1x-2x running speed
-    else:
-        peak_freq = random.uniform(120.0, 300.0)  # bearing defect frequencies
+    z_crest = round(z_peak / max(0.01, hf_rms), 2)
+    x_crest = round(x_peak / max(0.01, x_rms * 0.05), 2)
 
     payload = {
         "device_id": DEVICE_ID,
@@ -95,21 +154,20 @@ from omniview.edge.mqtt_client import OmniViewMQTTClient
 from omniview.edge.topics import build_topic
 
 def run_bot():
-    print(f"Starting Vibration Synthetic Data Bot... (Polling {POLL_INTERVAL}s interval)")
-    if not HAS_JSONSCHEMA:
-        print("Warning: 'jsonschema' package not installed. Strict payload validation is disabled.")
+    print(f"Starting Vibration Live Stochastic Bot... (Polling {POLL_INTERVAL}s interval)")
+    print("Mode: True Stochastic Live Generation (Mechanical Physics + Shared State)")
     
     topic = build_topic("pune-isbm", "compressor-01", "vibration")
-    iterations = 0
     with OmniViewMQTTClient() as client:
         while True:
-            is_anomaly = (iterations % 30 == 0) and iterations > 0
-            payload = generate_reading(is_anomaly)
+            payload = generate_reading()
             validate_payload(payload)
             client.publish(topic, payload)
-            print(f"[vibration_bot] Published to {topic} -> {json.dumps(payload)}")
             
-            iterations += 1
+            z = payload["data"]["z_axis_rms_velocity_mm_sec"]
+            k = payload["data"]["z_axis_kurtosis"]
+            print(f"[vibration_bot] Published -> RMS: {z} mm/s | Kurtosis: {k}")
+            
             time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":

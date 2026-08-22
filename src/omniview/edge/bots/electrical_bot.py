@@ -5,7 +5,6 @@ import random
 import datetime
 import csv
 from pathlib import Path
-from omniview.config import CALIBRATION_CURRENT_OFFSET_A
 
 try:
     import jsonschema
@@ -13,18 +12,20 @@ try:
 except ImportError:
     HAS_JSONSCHEMA = False
 
+import sys
+from omniview.edge.bots.stochastic import wanderer, PoissonTimer
+sys.path.append(str(Path(__file__).resolve().parents[3]))
+from omniview.config import CALIBRATION_CURRENT_OFFSET_A, CALIBRATION_VOLTAGE_OFFSET_V
+
 DEVICE_ID = "Selec-MFM384-01"
 POLL_INTERVAL = 15
 SCHEMA_PATH = Path(__file__).resolve().parents[4] / "schemas" / "electrical_schema.json"
 
-# Load schema once
 try:
     with open(SCHEMA_PATH, 'r') as f:
         ELECTRICAL_SCHEMA = json.load(f)
-except Exception as e:
-    print(f"Warning: Could not load schema from {SCHEMA_PATH}: {e}")
+except Exception:
     ELECTRICAL_SCHEMA = None
-
 
 def validate_payload(payload):
     if ELECTRICAL_SCHEMA and HAS_JSONSCHEMA:
@@ -33,35 +34,99 @@ def validate_payload(payload):
         except jsonschema.exceptions.ValidationError as e:
             print(f"Schema Validation Error: {e.message}")
 
-
+# --- Live Stochastic State ---
 cumulative_kwh = 150000.0
+# Ornstein-Uhlenbeck (AR1) states for organic wandering
+current_voltage_wander = 0.0  
+current_load_wander = 0.0
 
-def generate_reading(is_anomaly: bool = False) -> dict:
-    """Generates correlated per-phase electrical readings from physics."""
-    global cumulative_kwh
+# Poisson Anomaly Timer
+next_anomaly_time = 0.0
 
-    voltage_ll = 415.0 + random.uniform(-2, 2)
-    current_avg = 200.0 + random.uniform(-10, 10) + CALIBRATION_CURRENT_OFFSET_A
-    pf_avg = 0.95 + random.uniform(-0.02, 0.02)
+def _read_edge_state() -> dict:
+    state_file = Path(".edge_state.json")
+    if state_file.exists():
+        try:
+            with open(state_file, 'r') as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
 
-    if is_anomaly:
-        current_avg += 100.0
-        pf_avg -= 0.1
+def _write_edge_state(payload: dict):
+    state = _read_edge_state()
+    state["current_a_avg"] = payload["data"].get("current_a_avg", 0.0)
+    state["active_power_kw_total"] = payload["data"].get("active_power_kw_total", 0.0)
+    
+    state_file = Path(".edge_state.json")
+    try:
+        with open(state_file, 'w') as f:
+            json.dump(state, f)
+    except Exception as e:
+        print(f"Failed to write edge state: {e}")
+
+def get_poisson_anomaly():
+    """Uses a Poisson process to trigger anomalies randomly, not repetitively."""
+    global next_anomaly_time
+    now = time.time()
+    
+    if next_anomaly_time == 0.0:
+        # Initialize first anomaly (mean time: 2 hours)
+        next_anomaly_time = now + random.expovariate(1.0 / 7200.0)
+        return False
+        
+    if now >= next_anomaly_time:
+        # Trigger anomaly, and schedule the next one
+        next_anomaly_time = now + random.expovariate(1.0 / 7200.0)
+        return True
+        
+    return False
+
+def generate_reading() -> dict:
+    """Generates correlated readings using live stochastic AR(1) math."""
+    global cumulative_kwh, current_voltage_wander, current_load_wander
+    
+    # 1. Read downstream dependencies
+    edge_state = _read_edge_state()
+    # E.g., if a pneumatic compressor is running, it draws 40A.
+    # If the thermal heater is running at 100% duty, it draws 25A.
+    compressor_load = edge_state.get("compressor_running", 0) * 40.0
+    thermal_load = edge_state.get("thermal_duty_cycle", 0.0) * 0.25
+    
+    # Base physics loads (if upstream bots aren't running, assume defaults)
+    base_machine_load = 120.0 + compressor_load + thermal_load
+    
+    # 2. Apply Ornstein-Uhlenbeck (AR1) Process for true organic wandering
+    # x[t] = (1 - theta) * x[t-1] + theta * mean + sigma * noise
+    theta_v = 0.1 # Mean reversion speed for voltage
+    sigma_v = 0.5 # Volatility for voltage
+    current_voltage_wander = (1 - theta_v) * current_voltage_wander + random.gauss(0, sigma_v)
+    
+    theta_l = 0.05 # Mean reversion speed for load
+    sigma_l = 1.2  # Volatility for load
+    current_load_wander = (1 - theta_l) * current_load_wander + random.gauss(0, sigma_l)
+    
+    # 3. Calculate actual values
+    voltage_ll = 415.0 + current_voltage_wander + CALIBRATION_VOLTAGE_OFFSET_V
+    current_avg = base_machine_load + current_load_wander + CALIBRATION_CURRENT_OFFSET_A
+    pf_avg = 0.95 + wanderer.get('pf', 0.1, 0.005)
+
+    # 4. Check for Poisson Anomaly
+    if get_poisson_anomaly():
+        print("[!] Poisson Anomaly Triggered! (Inrush Current Spike)")
+        current_avg += random.uniform(80.0, 150.0) # Massive current spike
+        pf_avg -= 0.15 # Power factor crashes during inrush
 
     v_ln_avg = voltage_ll / 1.732
 
-    # --- Per-phase voltages: derived from average with slight imbalance ---
-    imb_v1 = random.gauss(0, 0.008)  # ~0.8% imbalance
-    imb_v2 = random.gauss(0, 0.008)
-    v_l1 = v_ln_avg * (1.0 + imb_v1)
-    v_l2 = v_ln_avg * (1.0 + imb_v2)
-    v_l3 = 3.0 * v_ln_avg - v_l1 - v_l2  # ensures avg identity
+    # --- Per-phase voltages (slight imbalance) ---
+    v_l1 = v_ln_avg * (1.0 + wanderer.get('v_phase', 0.1, 0.005))
+    v_l2 = v_ln_avg * (1.0 + wanderer.get('v_phase', 0.1, 0.005))
+    v_l3 = 3.0 * v_ln_avg - v_l1 - v_l2
 
-    # --- Per-phase currents: derived from average with load imbalance ---
-    imb_i1 = random.gauss(0, 0.03)  # ~3% load imbalance
-    imb_i2 = random.gauss(0, 0.03)
-    i_l1 = current_avg * (1.0 + imb_i1)
-    i_l2 = current_avg * (1.0 + imb_i2)
+    # --- Per-phase currents (load imbalance) ---
+    i_l1 = current_avg * (1.0 + wanderer.get('i_phase', 0.1, 0.02))
+    i_l2 = current_avg * (1.0 + wanderer.get('i_phase', 0.1, 0.02))
     i_l3 = 3.0 * current_avg - i_l1 - i_l2
     i_neutral = abs(i_l1 - i_l2) * random.uniform(0.10, 0.25)
 
@@ -71,28 +136,24 @@ def generate_reading(is_anomaly: bool = False) -> dict:
     kvar = (kva**2 - kw**2)**0.5 if kva > kw else 0.0
 
     # Per-phase active power
-    imb_p = random.gauss(0, 0.02)
-    kw_l1 = (kw / 3.0) * (1.0 + imb_p)
-    kw_l2 = (kw / 3.0) * (1.0 + random.gauss(0, 0.02))
+    kw_l1 = (kw / 3.0) * (1.0 + wanderer.get('i_phase', 0.1, 0.02))
+    kw_l2 = (kw / 3.0) * (1.0 + wanderer.get('i_phase', 0.1, 0.02))
     kw_l3 = kw - kw_l1 - kw_l2
 
-    # Per-phase power factor
-    pf_l1 = min(1.0, abs(pf_avg + random.gauss(0, 0.01)))
-    pf_l2 = min(1.0, abs(pf_avg + random.gauss(0, 0.01)))
-    pf_l3 = min(1.0, abs(pf_avg + random.gauss(0, 0.01)))
+    # --- THD (Total Harmonic Distortion) ---
+    load_ratio = min(1.0, kw / 200.0)
+    thd_v = round(2.0 + load_ratio * 3.0 + wanderer.get('thd_v', 0.1, 0.2), 2)
+    thd_i = round(5.0 + load_ratio * 10.0 + wanderer.get('thd_i', 0.1, 0.4), 2)
 
-    # --- THD: scales with load (heavier load = more harmonics) ---
-    max_kw = 200.0
-    load_ratio = min(1.0, kw / max_kw)
-    thd_v = round(2.0 + load_ratio * 3.0 + random.uniform(-0.3, 0.3), 2)
-    thd_i = round(5.0 + load_ratio * 10.0 + random.uniform(-0.5, 0.5), 2)
-
-    # Edge-computed metrics
-    rolling_kva = kva + random.uniform(-5, 5)
-    md_limit = 150.0
-    md_proximity = (rolling_kva / md_limit) * 100
+    rolling_kva = kva + wanderer.get('kva', 0.1, 2.0)
+    md_proximity = (rolling_kva / 150.0) * 100
 
     cumulative_kwh += kw * (POLL_INTERVAL / 3600.0)
+
+    # 5. Ugly Reality (Quantization & Missing Data)
+    # 0.1% chance of a dropped packet (frozen buffer simulation)
+    if random.random() < 0.001:
+        current_avg = 0.0 # Extreme glitch
 
     payload = {
         "device_id": DEVICE_ID,
@@ -116,10 +177,10 @@ def generate_reading(is_anomaly: bool = False) -> dict:
             "apparent_power_kva_total": round(kva, 2),
             "reactive_power_kvar_total": round(kvar, 2),
             "power_factor_avg": round(pf_avg, 3),
-            "power_factor_l1": round(pf_l1, 3),
-            "power_factor_l2": round(pf_l2, 3),
-            "power_factor_l3": round(pf_l3, 3),
-            "frequency_hz": round(50.0 + random.uniform(-0.2, 0.2), 2),
+            "power_factor_l1": round(pf_avg, 3),
+            "power_factor_l2": round(pf_avg, 3),
+            "power_factor_l3": round(pf_avg, 3),
+            "frequency_hz": round(50.0 + wanderer.get('freq', 0.05, 0.02), 2),
             "voltage_thd_percent": thd_v,
             "current_thd_percent": thd_i,
             "active_energy_kwh": round(cumulative_kwh, 2),
@@ -132,18 +193,16 @@ def generate_reading(is_anomaly: bool = False) -> dict:
     _write_edge_state(payload)
     return payload
 
-
 def cast_or_default(value, cast_type, default=0.0):
     try:
         return cast_type(value)
     except (ValueError, TypeError):
         return default
 
-
 def map_csv_row_to_payload(row):
-    """Maps a row from CSV to the strict Selec MFM384 schema structure."""
+    """Fallback for CSV replay if needed."""
     voltage_ll = cast_or_default(row.get("voltage_v_ll_avg", 415.0), float)
-    current = cast_or_default(row.get("current_a_avg", 200.0), float) + CALIBRATION_CURRENT_OFFSET_A
+    current = cast_or_default(row.get("current_a_avg", 200.0), float)
     pf = cast_or_default(row.get("power_factor_avg", 0.95), float)
     kw = cast_or_default(row.get("active_power_kw_total"), float, default=(voltage_ll * current * pf * 1.732) / 1000)
     kva = cast_or_default(row.get("apparent_power_kva_total"), float, default=(voltage_ll * current * 1.732) / 1000)
@@ -172,18 +231,6 @@ def map_csv_row_to_payload(row):
     _write_edge_state(payload)
     return payload
 
-def _write_edge_state(payload: dict):
-    state = {
-        "current_a_avg": payload["data"].get("current_a_avg", 0.0),
-        "active_power_kw_total": payload["data"].get("active_power_kw_total", 0.0)
-    }
-    state_file = Path(".edge_state.json")
-    try:
-        with open(state_file, 'w') as f:
-            json.dump(state, f)
-    except Exception as e:
-        print(f"Failed to write edge state: {e}")
-
 
 from omniview.edge.mqtt_client import OmniViewMQTTClient
 from omniview.edge.topics import build_topic
@@ -193,39 +240,27 @@ def run_bot():
     csv_file = Path(csv_path)
 
     print(f"Starting Electrical Publisher... (Polling {POLL_INTERVAL}s interval)")
-    if csv_file.exists():
-        print(f"Mode: CSV Replay ({csv_file})")
-    else:
-        print(f"Mode: Synthetic Fallback (CSV not found at {csv_file})")
-
+    print("Mode: True Stochastic Live Generation (Ornstein-Uhlenbeck + Poisson)")
+    
     if not HAS_JSONSCHEMA:
         print("Warning: 'jsonschema' package not installed. Strict payload validation is disabled.")
     
     topic = build_topic("pune-isbm", "compressor-01", "electrical")
-    iterations = 0
     
     with OmniViewMQTTClient() as client:
         while True:
-            # Loop to restart CSV when EOF is reached
-            if csv_file.exists():
-                with open(csv_file, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        payload = map_csv_row_to_payload(row)
-                        validate_payload(payload)
-                        client.publish(topic, payload)
-                        print(f"[electrical_bot] Published to {topic} -> {json.dumps(payload)}")
-                        time.sleep(POLL_INTERVAL) # Pulse every 15s
-            else:
-                # Fallback Synthetic mode
-                is_anomaly = (iterations % 20 == 0) and iterations > 0
-                payload = generate_reading(is_anomaly)
-                validate_payload(payload)
-                client.publish(topic, payload)
-                print(f"[electrical_bot] Published to {topic} -> {json.dumps(payload)}")
-                iterations += 1
-                time.sleep(POLL_INTERVAL)
+            # We strictly generate live stochastic data now
+            payload = generate_reading()
+            validate_payload(payload)
+            client.publish(topic, payload)
+            
+            # Print a condensed preview to the console for the manager to see
+            v = payload["data"]["voltage_v_ll_avg"]
+            a = payload["data"]["current_a_avg"]
+            kw = payload["data"]["active_power_kw_total"]
+            print(f"[electrical_bot] Published -> V: {v}V | I: {a}A | P: {kw}kW")
+            
+            time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
     run_bot()
-
