@@ -19,24 +19,67 @@
     "data": {
       "type": "object",
       "properties": {
-        "switching_state_bdc1": { "type": "boolean", "description": "Is metal currently detected? (Binary Data Channel 1)" },
-        "counter_value": { "type": "integer", "description": "Internal hardware stroke counter (total lifetime pulses)" },
-        "device_temperature_c": { "type": "number", "description": "Internal chip temperature of the inductive sensor" },
-        "operating_hours": { "type": "integer", "description": "Total hours the sensor has been powered on" },
-        "signal_quality": { "type": "integer", "description": "0 to 255 indicator of sensor alignment and cleanliness" },
-        "strokes_in_interval": { "type": "integer", "description": "Edge-computed number of machine cycles in the last polling interval" },
-        "last_cycle_time_seconds": { "type": "number", "description": "Time elapsed between the last two falling edges of the pulse" }
+        "switching_state_bdc1": {
+          "type": "boolean",
+          "description": "Is metal currently detected? (Binary Data Channel 1)"
+        },
+        "switching_state_bdc2": {
+          "type": "boolean",
+          "description": "Complementary output (Binary Data Channel 2)"
+        },
+        "counter_value": {
+          "type": "integer",
+          "description": "Internal hardware stroke counter (total lifetime pulses)"
+        },
+        "device_temperature_c": {
+          "type": "number",
+          "description": "Internal chip temperature of the inductive sensor"
+        },
+        "operating_hours": {
+          "type": "integer",
+          "description": "Total hours the sensor has been powered on"
+        },
+        "signal_quality": {
+          "type": "integer",
+          "description": "0 to 255 indicator of sensor alignment and cleanliness"
+        },
+        "sensing_distance_margin_pct": {
+          "type": "number",
+          "description": "Percentage margin of sensing distance (derived from signal quality)"
+        },
+        "device_status_code": {
+          "type": "integer",
+          "description": "IO-Link device status: 0=OK, 1=Maintenance needed"
+        },
+        "strokes_in_interval": {
+          "type": "integer",
+          "description": "Edge-computed number of machine cycles in the last polling interval"
+        },
+        "last_cycle_time_seconds": {
+          "type": "number",
+          "description": "Time elapsed between the last two falling edges of the pulse"
+        }
       },
       "required": [
         "switching_state_bdc1",
+        "switching_state_bdc2",
         "counter_value",
         "device_temperature_c",
         "operating_hours",
         "signal_quality",
+        "sensing_distance_margin_pct",
+        "device_status_code",
         "strokes_in_interval",
         "last_cycle_time_seconds"
-      ]
+      ],
+      "additionalProperties": false
     }
   },
-  "required": ["device_id", "timestamp", "sensor_type", "data"]
+  "required": [
+    "device_id",
+    "timestamp",
+    "sensor_type",
+    "data"
+  ],
+  "additionalProperties": false
 }

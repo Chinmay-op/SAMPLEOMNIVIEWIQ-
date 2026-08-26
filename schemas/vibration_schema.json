@@ -19,13 +19,68 @@
     "data": {
       "type": "object",
       "properties": {
-        "z_axis_rms_velocity_mm_sec": { "type": "number", "description": "Primary ISO 10816-3 RMS vibration velocity (Z-axis) in mm/s" },
-        "x_axis_rms_velocity_mm_sec": { "type": "number", "description": "Lateral RMS vibration velocity (X-axis) in mm/s" },
-        "z_axis_peak_acceleration_g": { "type": "number", "description": "High-frequency peak acceleration (Z-axis) in g" },
-        "x_axis_peak_acceleration_g": { "type": "number", "description": "High-frequency peak acceleration (X-axis) in g" },
-        "high_frequency_rms_acceleration_g": { "type": "number", "description": "High-frequency RMS acceleration in g for early bearing fault detection" },
-        "temperature_c": { "type": "number", "description": "Surface temperature of the mounted component in Celsius" },
-        "iso_health_zone": { "type": "string", "enum": ["ZONE_A", "ZONE_B", "ZONE_C", "ZONE_D"], "description": "Edge-computed ISO 10816-3 Health Zone classification" }
+        "z_axis_rms_velocity_mm_sec": {
+          "type": "number",
+          "description": "Primary ISO 10816-3 RMS vibration velocity (Z-axis) in mm/s"
+        },
+        "x_axis_rms_velocity_mm_sec": {
+          "type": "number",
+          "description": "Lateral RMS vibration velocity (X-axis) in mm/s"
+        },
+        "z_axis_peak_acceleration_g": {
+          "type": "number",
+          "description": "High-frequency peak acceleration (Z-axis) in g"
+        },
+        "x_axis_peak_acceleration_g": {
+          "type": "number",
+          "description": "High-frequency peak acceleration (X-axis) in g"
+        },
+        "high_frequency_rms_acceleration_g": {
+          "type": "number",
+          "description": "High-frequency RMS acceleration in g for early bearing fault detection"
+        },
+        "z_axis_kurtosis": {
+          "type": "number",
+          "description": "Kurtosis of Z-axis vibration waveform (3.0 = Gaussian, >5.0 = impulsive fault)"
+        },
+        "x_axis_kurtosis": {
+          "type": "number",
+          "description": "Kurtosis of X-axis vibration waveform"
+        },
+        "z_axis_crest_factor": {
+          "type": "number",
+          "description": "Crest factor (peak/RMS) Z-axis"
+        },
+        "x_axis_crest_factor": {
+          "type": "number",
+          "description": "Crest factor (peak/RMS) X-axis"
+        },
+        "peak_velocity_component_freq_hz": {
+          "type": "number",
+          "description": "Frequency of the dominant velocity peak in Hz"
+        },
+        "temperature_c": {
+          "type": "number",
+          "description": "Surface temperature of the mounted component in Celsius"
+        },
+        "iso_health_zone": {
+          "type": "string",
+          "enum": [
+            "ZONE_A",
+            "ZONE_B",
+            "ZONE_C",
+            "ZONE_D"
+          ],
+          "description": "Edge-computed ISO 10816-3 Health Zone classification"
+        },
+        "data_source": {
+          "type": "string",
+          "enum": [
+            "synthetic",
+            "CWRU"
+          ],
+          "description": "Origin of the payload data"
+        }
       },
       "required": [
         "z_axis_rms_velocity_mm_sec",
@@ -33,10 +88,23 @@
         "z_axis_peak_acceleration_g",
         "x_axis_peak_acceleration_g",
         "high_frequency_rms_acceleration_g",
+        "z_axis_kurtosis",
+        "x_axis_kurtosis",
+        "z_axis_crest_factor",
+        "x_axis_crest_factor",
+        "peak_velocity_component_freq_hz",
         "temperature_c",
-        "iso_health_zone"
-      ]
+        "iso_health_zone",
+        "data_source"
+      ],
+      "additionalProperties": false
     }
   },
-  "required": ["device_id", "timestamp", "sensor_type", "data"]
+  "required": [
+    "device_id",
+    "timestamp",
+    "sensor_type",
+    "data"
+  ],
+  "additionalProperties": false
 }

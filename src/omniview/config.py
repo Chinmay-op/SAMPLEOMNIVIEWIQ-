@@ -50,6 +50,11 @@ POLL_PHYSICAL_INTERVAL: int = int(os.getenv("POLL_PHYSICAL_INTERVAL", "60"))
 SITE_ID: str = os.getenv("SITE_ID", "pune-isbm")
 CONTRACTED_DEMAND_KVA: float = float(os.getenv("CONTRACTED_DEMAND_KVA", "500"))
 
+# ── Calibration Offsets (OI-40) ──────────────────────────────────────────────
+# Offsets applied to raw modbus/simulated readings before JSON validation
+CALIBRATION_CURRENT_OFFSET_A: float = float(os.getenv("CALIBRATION_CURRENT_OFFSET_A", "0.0"))
+CALIBRATION_VOLTAGE_OFFSET_V: float = float(os.getenv("CALIBRATION_VOLTAGE_OFFSET_V", "0.0"))
+
 # ── Offline buffer (OI-28) ──────────────────────────────────────────────
 BUFFER_DB_PATH: str = os.getenv(
     "BUFFER_DB_PATH",

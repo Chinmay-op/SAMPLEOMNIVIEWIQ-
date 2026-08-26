@@ -43,12 +43,27 @@ class TestOnSensorMessage:
             "data": {
                 "voltage_v_ln_avg": 239.5,
                 "voltage_v_ll_avg": 414.8,
+                "voltage_v_l1_n": 240.1,
+                "voltage_v_l2_n": 239.2,
+                "voltage_v_l3_n": 239.2,
                 "current_a_avg": 205.3,
+                "current_a_l1": 206.1,
+                "current_a_l2": 204.5,
+                "current_a_l3": 205.3,
+                "current_a_neutral": 0.3,
                 "active_power_kw_total": 140.2,
+                "active_power_kw_l1": 46.8,
+                "active_power_kw_l2": 46.7,
+                "active_power_kw_l3": 46.7,
                 "apparent_power_kva_total": 147.6,
                 "reactive_power_kvar_total": 45.8,
                 "power_factor_avg": 0.949,
+                "power_factor_l1": 0.950,
+                "power_factor_l2": 0.948,
+                "power_factor_l3": 0.949,
                 "frequency_hz": 50.02,
+                "voltage_thd_percent": 2.5,
+                "current_thd_percent": 11.2,
                 "active_energy_kwh": 150042.5,
                 "apparent_energy_kvah": 157544.6,
                 "rolling_kva_15min": 148.1,
@@ -86,12 +101,27 @@ class TestOnSensorMessage:
             "data": {
                 "voltage_v_ln_avg": 239.5,
                 "voltage_v_ll_avg": 414.8,
+                "voltage_v_l1_n": 240.1,
+                "voltage_v_l2_n": 239.2,
+                "voltage_v_l3_n": 239.2,
                 "current_a_avg": 205.3,
+                "current_a_l1": 206.1,
+                "current_a_l2": 204.5,
+                "current_a_l3": 205.3,
+                "current_a_neutral": 0.3,
                 "active_power_kw_total": 140.2,
+                "active_power_kw_l1": 46.8,
+                "active_power_kw_l2": 46.7,
+                "active_power_kw_l3": 46.7,
                 "apparent_power_kva_total": 147.6,
                 "reactive_power_kvar_total": 45.8,
                 "power_factor_avg": 0.949,
+                "power_factor_l1": 0.950,
+                "power_factor_l2": 0.948,
+                "power_factor_l3": 0.949,
                 "frequency_hz": 50.02,
+                "voltage_thd_percent": 2.5,
+                "current_thd_percent": 11.2,
                 "active_energy_kwh": 150042.5,
                 "apparent_energy_kvah": 157544.6,
                 "rolling_kva_15min": 148.1,
@@ -187,9 +217,9 @@ class TestOnSensorMessage:
     ) -> None:
         """DB errors should be logged but never crash the subscriber."""
         from omniview.ingest.subscriber import _on_sensor_message, get_stats
-
+    
         mock_insert.side_effect = RuntimeError("DB connection lost")
-
+    
         payload = {
             "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
@@ -209,12 +239,12 @@ class TestOnSensorMessage:
                 "md_proximity_percent": 29.6,
             },
         }
-
+    
         # Should NOT raise
         _on_sensor_message(
             "omniview/pune-isbm/compressor-01/electrical", payload
         )
-
+    
         stats = get_stats()
         assert stats["errors"] == 1
         assert stats["inserted"] == 0
