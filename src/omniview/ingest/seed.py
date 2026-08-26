@@ -290,11 +290,8 @@ def generate_timeline(
 
     while t < end:
         # Generate base reading from DevB bot
-        # ambient_bot.generate_reading() takes no args; others take is_anomaly
-        if sensor_type == "ambient":
-            raw = generator()
-        else:
-            raw = generator(is_anomaly=False)
+        # All bots use generate_reading() with no args after DevB refactor
+        raw = generator()
 
         # Extract the data payload from the bot output
         data = raw.get("data", raw)

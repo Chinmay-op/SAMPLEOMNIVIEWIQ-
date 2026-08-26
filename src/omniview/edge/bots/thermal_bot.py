@@ -87,6 +87,7 @@ def get_poisson_anomaly():
     return False
 
 def generate_reading() -> dict:
+    wanderer.end_tick()
     global current_pv, integral_error, prev_error, last_pv_15m, mv_saturation_streak
     
     edge_state = _read_edge_state()
