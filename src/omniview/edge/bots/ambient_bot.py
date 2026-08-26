@@ -9,7 +9,7 @@ import sys
 # Ensure omniview is importable
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
-from omniview.edge.bots.stochastic import wanderer
+from omniview.edge.bots.stochastic import wanderer, sim_clock
 import sys
 
 # Ensure omniview is importable
@@ -69,7 +69,8 @@ rh_wander = 0.0
 
 def generate_reading() -> dict:
     global temp_wander, rh_wander
-    now = datetime.datetime.utcnow()
+    wanderer.end_tick()
+    now = datetime.datetime.fromtimestamp(sim_clock.now())
     time_in_hours = now.hour + (now.minute / 60.0)
     
     # Pune climate baseline (Stochastically drifting amplitude and offset)
@@ -103,6 +104,11 @@ def generate_reading() -> dict:
     heat_index = round(temp_c + 0.33 * e - 0.70 * 0.5 - 4.0, 2)
 
     rssi = int(-65 - (temp_c - 25.0) * 0.3 + wanderer.get("rssi", 0.1, 1.5))
+
+    # 5. Ugly Reality (Benign Glitch)
+    # 0.1% chance of Modbus register corruption (stuck at 0)
+    if random.random() < 0.001:
+        rh_pct = 0.0
 
     payload = {
         "device_id": DEVICE_ID,

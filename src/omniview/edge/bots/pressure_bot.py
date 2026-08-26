@@ -4,7 +4,7 @@ import random
 import datetime
 from pathlib import Path
 import sys
-from omniview.edge.bots.stochastic import wanderer, PoissonTimer
+from omniview.edge.bots.stochastic import wanderer, sim_clock, PoissonTimer
 
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
@@ -77,7 +77,7 @@ TEACH_SP2 = 18.0
 def get_poisson_anomaly():
     """Poisson timer for major pneumatic leaks."""
     global next_anomaly_time, anomaly_active_until
-    now = time.time()
+    now = sim_clock.now()
     if now < anomaly_active_until:
         return True 
     if next_anomaly_time == 0.0:
@@ -91,19 +91,27 @@ def get_poisson_anomaly():
 
 def generate_reading() -> dict:
     global current_pressure, pressure_min_memory, pressure_max_memory, compressor_active
+    wanderer.end_tick()
 
     edge_state = _read_edge_state()
     machine_running = edge_state.get("machine_running", True)
     ambient_temp = edge_state.get("ambient_temp_c", 25.0)
+    voltage_sag = edge_state.get("grid_voltage_sag", False)
 
     is_leak = get_poisson_anomaly()
 
     # --- Live Pneumatic Physics ---
     dt = POLL_INTERVAL
     
-    base_leak = 0.5 + wanderer.get("leak_base", 0.01, 0.05)
-    base_pump = 0.6 + wanderer.get("pump_base", 0.01, 0.05)
+    # Floors at zero: a pump can't pump backwards, a leak can't un-leak
+    # θ tuned for 5-day runs: 0.05 gives realistic fluctuation without drift
+    base_leak = max(0.0, 0.05 + wanderer.get("leak_base", 0.02, 0.005))
+    base_pump = max(0.0, 0.2 + wanderer.get("pump_base", 0.05, 0.02))
     
+    # Motor torque loss due to voltage sag
+    if voltage_sag:
+        base_pump *= 0.6  # 40% loss of pumping power
+
     if is_leak:
         leak_rate = base_leak * (current_pressure / 40.0) # Non-linear leak  # bar/sec loss
     elif machine_running:
@@ -127,6 +135,13 @@ def generate_reading() -> dict:
     current_pressure += net_change
     current_pressure = max(0.0, min(current_pressure, 40.0)) # Clamp 0-40 bar
 
+    # 5. Ugly Reality (Benign Glitch)
+    # 0.1% chance of ADC momentary fault
+    # Use a LOCAL variable so the persistent physics state is NOT corrupted
+    reported_pressure = current_pressure
+    if random.random() < 0.001:
+        reported_pressure = 0.0
+
     # Trend calculation
     if net_change > 1.0:
         trend = "RISING"
@@ -143,26 +158,26 @@ def generate_reading() -> dict:
         comp_state = "OFF"
 
     # Switching outputs
-    out1 = current_pressure < TEACH_SP1
-    out2 = current_pressure < TEACH_SP2
+    out1 = reported_pressure < TEACH_SP1
+    out2 = reported_pressure < TEACH_SP2
     
     status = 3 if out2 else (1 if out1 else 0)
 
     pressure_min_memory = min(pressure_min_memory, current_pressure)
     pressure_max_memory = max(pressure_max_memory, current_pressure)
 
-    pdv_raw = bar_to_raw(current_pressure)
+    pdv_raw = bar_to_raw(reported_pressure)
     
     # Internal chip temperature tracks ambient but is warmer
-    chip_temp = round(ambient_temp + 5.0 + wanderer.get('chip_temp', 0.1, 0.2), 1)
+    chip_temp = round(ambient_temp + 5.0 + wanderer.get('pressure_chip_temp', 0.1, 0.2), 1)
 
     payload = {
         "device_id": DEVICE_ID,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
         "sensor_type": "pressure_transmitter",
         "data": {
             "process_data_variable_raw": pdv_raw,
-            "pressure_bar": round(current_pressure, 2),
+            "pressure_bar": round(reported_pressure, 2),
             "pressure_unit": "bar",
             "pressure_min_memory_bar": round(pressure_min_memory, 2),
             "pressure_max_memory_bar": round(pressure_max_memory, 2),

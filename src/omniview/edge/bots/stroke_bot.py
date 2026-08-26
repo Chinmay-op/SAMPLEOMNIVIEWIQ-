@@ -4,7 +4,7 @@ import random
 import datetime
 from pathlib import Path
 import sys
-from omniview.edge.bots.stochastic import wanderer, PoissonTimer
+from omniview.edge.bots.stochastic import wanderer, sim_clock, PoissonTimer
 
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
@@ -67,7 +67,7 @@ anomaly_active_until = 0.0
 
 def get_poisson_anomaly():
     global next_anomaly_time, anomaly_active_until
-    now = time.time()
+    now = sim_clock.now()
     
     if now < anomaly_active_until:
         return True 
@@ -85,6 +85,7 @@ def get_poisson_anomaly():
 
 def generate_reading() -> dict:
     global current_counter, operating_hours, cycle_wander
+    wanderer.end_tick()
     
     is_anomaly = get_poisson_anomaly()
 
@@ -98,18 +99,23 @@ def generate_reading() -> dict:
 
     if is_anomaly:
         strokes = 0
-        cycle_time = 0.0
-        signal_quality = int(max(0, 255 - random.expovariate(1/50.0))) # degraded
+        cycle_time = round(actual_cycle_time, 2)
+        signal_quality = int(max(0, min(255, 255 - random.expovariate(1/50.0))))
     else:
         # At 22s/cycle, a 15s poll interval usually has 0 strokes (32%), sometimes 1 (68%).
         strokes = 1 if random.random() < (15.0 / actual_cycle_time) else 0
-        cycle_time = round(actual_cycle_time, 2) if strokes > 0 else 0.0
-        signal_quality = 255
+        cycle_time = round(actual_cycle_time, 2)
+        signal_quality = int(max(0, min(255, 253 + wanderer.get('sig_q', 0.2, 1.2))))
         
     current_counter += strokes
     operating_hours += (POLL_INTERVAL / 3600.0)
-    
-    bdc1 = (time.time() % actual_cycle_time) < (actual_cycle_time * 0.20) # True physical phase detection (20% of cycle)
+
+    # 5. Ugly Reality (Benign Glitch)
+    # 0.1% chance of IO-Link comms timeout
+    if random.random() < 0.001:
+        cycle_time = 999.9
+
+    bdc1 = (sim_clock.now() % actual_cycle_time) < (actual_cycle_time * 0.20) # True physical phase detection (20% of cycle)
     bdc2 = not bdc1
     sensing_margin = round((signal_quality / 255.0) * 100.0, 1)
     device_status = 0 if signal_quality > 180 else 1
@@ -117,11 +123,11 @@ def generate_reading() -> dict:
     # AR1 process for chip temp based on ambient
     edge_state = _read_edge_state()
     ambient = edge_state.get("ambient_temp_c", 25.0)
-    chip_temp = round(ambient + 12.0 + wanderer.get('chip_temp', 0.1, 0.5), 1)
+    chip_temp = round(ambient + 12.0 + wanderer.get('stroke_chip_temp', 0.1, 0.5), 1)
 
     payload = {
         "device_id": DEVICE_ID,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
         "sensor_type": "digital_pulse_counter",
         "data": {
             "switching_state_bdc1": bdc1,

@@ -4,7 +4,7 @@ import random
 import datetime
 from pathlib import Path
 import sys
-from omniview.edge.bots.stochastic import wanderer, PoissonTimer
+from omniview.edge.bots.stochastic import wanderer, PoissonTimer, sim_clock
 
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
@@ -42,10 +42,11 @@ def _read_edge_state() -> dict:
             pass
     return {}
 
-def _write_edge_state(payload: dict):
+def _write_edge_state(payload: dict, is_anomaly: bool):
     state = _read_edge_state()
     state["thermal_duty_cycle"] = payload["data"].get("manipulated_variable_mv_heat_percent", 0.0)
     state["thermal_pv"] = payload["data"].get("present_value_pv_c", 25.0)
+    state["heater_failed"] = is_anomaly
     
     state_file = Path(".edge_state.json")
     try:
@@ -56,10 +57,11 @@ def _write_edge_state(payload: dict):
 
 
 # --- Live Stochastic PID State ---
-current_pv = 25.0
+current_pv = 250.0  # Start near setpoint (skip cold-start transient)
 integral_error = 0.0
 prev_error = 0.0
-last_pv_15m = [25.0] * 15
+mv_saturation_streak = 0
+last_pv_15m = [250.0] * 15
 
 # Poisson Anomaly Timer
 next_anomaly_time = 0.0
@@ -68,7 +70,7 @@ anomaly_active_until = 0.0
 def get_poisson_anomaly():
     """Uses a Poisson process to trigger thermal anomalies (e.g., Heater Burnout)."""
     global next_anomaly_time, anomaly_active_until
-    now = time.time()
+    now = sim_clock.now()
     
     if now < anomaly_active_until:
         return True # Still in anomaly state
@@ -79,19 +81,18 @@ def get_poisson_anomaly():
         
     if now >= next_anomaly_time:
         next_anomaly_time = now + random.expovariate(1.0 / 21600.0)
-        anomaly_active_until = now + random.uniform(60, 300) # Anomaly lasts 1-5 mins
+        anomaly_active_until = now + random.uniform(300, 1800) # Burnout lasts 5-30 mins (real heater failures don't self-repair in 60s)
         return True
         
     return False
 
 def generate_reading() -> dict:
-    global current_pv, integral_error, prev_error, last_pv_15m
+    global current_pv, integral_error, prev_error, last_pv_15m, mv_saturation_streak
     
     edge_state = _read_edge_state()
     ambient_temp = edge_state.get("ambient_temp_c", 25.0)
     
     sp = 255.0 # Setpoint
-    hb = False
     error = False
 
     is_anomaly = get_poisson_anomaly()
@@ -114,17 +115,19 @@ def generate_reading() -> dict:
 
     # --- Thermodynamic Physics ---
     # Heat gained from heater vs Heat lost to ambient
-    heater_power = 0.02 # degrees per second at 100% duty
+    # Calibrated: at 0.06°C/s and cooling_rate 0.0002, equilibrium at 100% duty = ~325°C.
+    # PID will settle at 255°C setpoint with MV ≈ 78% duty (realistic).
+    heater_power = 0.06 # degrees per second at 100% duty
     ambient_cooling_rate = 0.0002
     
+    # Add SSR noise to PID output (always — anomaly or not, the controller still runs)
+    mv = max(0.0, min(100.0, mv + wanderer.get('mv', 0.2, 1.0)))
+    
     if is_anomaly:
-        # Simulate heater burnout: MV is maxed out, but no heat is generated
-        mv = 100.0
-        hb = True
+        # Heater burnout: PID still runs and MV climbs naturally toward saturation,
+        # but the heating element is physically dead — zero heat generated
         heat_gained = 0.0
     else:
-        # Normal operation: add noise to MV to simulate fluctuating SSR
-        mv = max(0.0, min(100.0, mv + wanderer.get('mv', 0.2, 1.0)))
         heat_gained = (mv / 100.0) * heater_power * dt
         
     heat_lost = (current_pv - ambient_temp) * ambient_cooling_rate * dt
@@ -153,17 +156,26 @@ def generate_reading() -> dict:
     else:
         state_str = "AT_SETPOINT"
 
-    ssr_fail = hb and mv >= 99.0
-    loop_burnout = abs(current_pv - sp) > 30.0
+    # Physics-based heater burnout detection:
+    # MV saturated AND temperature stalled/falling (not climbing toward SP)
+    mv_saturation_streak = mv_saturation_streak + 1 if mv >= 98.0 else 0
+    pv_rate = (heat_gained - heat_lost) / dt if dt > 0 else 0.0  # °C/s
+    pv_stalled = pv_rate < 0.001  # effectively not heating
+    hb = (mv_saturation_streak >= 2) and (sp - current_pv > 3.0) and pv_stalled
+    ssr_fail = hb and (mv >= 99.0) and (random.random() < 0.3)
+    # Only flag loop_burnout if PV has genuinely stalled, not just during startup
+    loop_burnout = (abs(current_pv - sp) > 30.0) and pv_stalled
+
+    reported_pv = current_pv + random.uniform(-0.5, 0.5)
 
     payload = {
         "device_id": DEVICE_ID,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
         "sensor_type": "thermal_probe",
         "data": {
-            "present_value_pv_c": round(current_pv, 1),
+            "present_value_pv_c": round(reported_pv, 3),
             "set_point_sp_c": sp,
-            "manipulated_variable_mv_heat_percent": round(mv, 1),
+            "manipulated_variable_mv_heat_percent": round(mv, 2),
             "proportional_band_p": Kp,
             "integral_time_i_sec": Ki,
             "derivative_time_d_sec": Kd,
@@ -177,7 +189,7 @@ def generate_reading() -> dict:
         }
     }
     
-    _write_edge_state(payload)
+    _write_edge_state(payload, is_anomaly)
     return payload
 
 

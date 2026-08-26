@@ -19,12 +19,30 @@
     "data": {
       "type": "object",
       "properties": {
-        "ambient_temp_c": { "type": "number", "description": "Ambient room temperature in Celsius" },
-        "relative_humidity_pct": { "type": "number", "description": "Relative room humidity percentage" },
-        "dew_point_c": { "type": "number", "description": "Calculated dew point temperature in Celsius (Magnus formula)" },
-        "heat_index_c": { "type": "number", "description": "Computed heat index in Celsius" },
-        "wireless_signal_strength_dbm": { "type": "integer", "description": "Zigbee RSSI in dBm" },
-        "environmental_baseline_offset": { "type": "number", "description": "Edge-computed offset against machine cooling load demand" }
+        "ambient_temp_c": {
+          "type": "number",
+          "description": "Ambient room temperature in Celsius"
+        },
+        "relative_humidity_pct": {
+          "type": "number",
+          "description": "Relative room humidity percentage"
+        },
+        "dew_point_c": {
+          "type": "number",
+          "description": "Calculated dew point temperature in Celsius (Magnus formula)"
+        },
+        "heat_index_c": {
+          "type": "number",
+          "description": "Computed heat index in Celsius"
+        },
+        "wireless_signal_strength_dbm": {
+          "type": "integer",
+          "description": "Zigbee RSSI in dBm"
+        },
+        "environmental_baseline_offset": {
+          "type": "number",
+          "description": "Edge-computed offset against machine cooling load demand"
+        }
       },
       "required": [
         "ambient_temp_c",
@@ -33,8 +51,15 @@
         "heat_index_c",
         "wireless_signal_strength_dbm",
         "environmental_baseline_offset"
-      ]
+      ],
+      "additionalProperties": false
     }
   },
-  "required": ["device_id", "timestamp", "sensor_type", "data"]
+  "required": [
+    "device_id",
+    "timestamp",
+    "sensor_type",
+    "data"
+  ],
+  "additionalProperties": false
 }

@@ -4,7 +4,7 @@ import random
 import datetime
 from pathlib import Path
 import sys
-from omniview.edge.bots.stochastic import wanderer, PoissonTimer
+from omniview.edge.bots.stochastic import wanderer, sim_clock, PoissonTimer
 
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
@@ -50,13 +50,14 @@ def _read_edge_state() -> dict:
 
 # Live State
 bearing_wear_wander = 0.0
+defect_severity = 0.0  # Ramps 0→1 gradually during bearing defect
 next_anomaly_time = 0.0
 anomaly_active_until = 0.0
 
 def get_poisson_bearing_defect():
     """Poisson timer for bearing degradation."""
     global next_anomaly_time, anomaly_active_until
-    now = time.time()
+    now = sim_clock.now()
     if now < anomaly_active_until:
         return True 
     if next_anomaly_time == 0.0:
@@ -69,25 +70,28 @@ def get_poisson_bearing_defect():
     return False
 
 def generate_reading() -> dict:
-    global bearing_wear_wander
+    global bearing_wear_wander, defect_severity
+    wanderer.end_tick()
 
     edge_state = _read_edge_state()
     machine_running = edge_state.get("machine_running", True)
     compressor_running = edge_state.get("compressor_running", 0) == 1
     ambient_temp = edge_state.get("ambient_temp_c", 25.0)
+    voltage_sag = edge_state.get("grid_voltage_sag", False)
     
     is_bearing_defect = get_poisson_bearing_defect()
 
     if not machine_running:
         # Machine is off. Only tiny floor vibrations exist.
-        z_rms = 0.2 + wanderer.get('vib_z_off', 0.1, 0.05)
-        x_rms = 0.1 + wanderer.get('vib_x_off', 0.1, 0.02)
+        # Clamp at zero — RMS is a squared-root quantity, physically cannot be negative
+        z_rms = max(0.0, 0.2 + wanderer.get('vib_z_off', 0.1, 0.05))
+        x_rms = max(0.0, 0.1 + wanderer.get('vib_x_off', 0.1, 0.02))
         z_peak = z_rms * 1.5
         x_peak = x_rms * 1.5
         hf_rms = z_rms * 0.1
         temp_c = ambient_temp
-        z_kurtosis = 3.0 + wanderer.get('kurt_noise', 0.2, 0.1)
-        x_kurtosis = 3.0 + wanderer.get('kurt_noise', 0.2, 0.1)
+        z_kurtosis = 3.0 + wanderer.get('kurt_z_off', 0.2, 0.1)
+        x_kurtosis = 3.0 + wanderer.get('kurt_x_off', 0.2, 0.1)
         peak_freq = 0.0
     else:
         # --- Live Mechanical Physics (AR1) ---
@@ -95,42 +99,64 @@ def generate_reading() -> dict:
         sigma_v = 0.15
         bearing_wear_wander = (1 - theta_v) * bearing_wear_wander + random.gauss(0, sigma_v)
 
-        # Base running vibration
-        base_rms = 1.5 + bearing_wear_wander
+        # Base running vibration (floored — RMS cannot go negative)
+        base_rms = max(0.3, 1.5 + bearing_wear_wander)
         
         # If the compressor kicks on, it adds massive shake to the chassis
         if compressor_running:
             base_rms += 2.5 + wanderer.get('comp_noise', 0.2, 0.5)
+            
+        # Motor slip caused by electrical voltage sag
+        if voltage_sag:
+            base_rms += 1.2  # Unbalanced magnetic pull increases vibration
 
         if is_bearing_defect:
-            # Defect state: Kurtosis spikes massively as a leading indicator, RMS increases moderately
-            z_rms = base_rms + wanderer.get('z_defect', 0.1, 1.0) + 4.0
-            z_peak = wanderer.get('z_peak_defect', 0.1, 2.0) + 11.5 # Spiky impacts
-            hf_rms = wanderer.get('hf_defect', 0.1, 0.8) + 3.75
-            temp_c = ambient_temp + 15.0 + wanderer.get('temp_defect', 0.05, 1.5) + 7.5 # Friction heat
-            z_kurtosis = wanderer.get('z_peak_defect', 0.1, 2.0) + 11.5 # Massive Kurtosis spike
-            peak_freq = 200.0 + wanderer.get('freq_defect', 0.1, 30.0) # High frequency defect
+            # Gradual ramp: takes ~30 ticks (30 min at 60s) to reach full severity
+            defect_severity = min(1.0, defect_severity + 0.03)
+        else:
+            # Faster recovery when defect clears
+            defect_severity = max(0.0, defect_severity - 0.05)
+
+        if defect_severity > 0.0:
+            # Kurtosis leads RMS — reaches full severity 1.5× faster (real bearing physics)
+            kurt_severity = min(1.0, defect_severity * 1.5)
+            # Defect state: features scale with severity rather than jumping instantly
+            z_rms = max(0.0, base_rms + (wanderer.get('z_defect', 0.1, 1.0) + 4.0) * defect_severity)
+            z_peak = max(0.0, (wanderer.get('z_peak_defect', 0.1, 2.0) + 11.5) * defect_severity + z_rms * (1.5 + wanderer.get('z_peak_rel_def', 0.1, 0.2)) * (1.0 - defect_severity))
+            hf_rms = max(0.0, (wanderer.get('hf_defect', 0.1, 0.8) + 3.75) * defect_severity + z_rms * (0.15 + wanderer.get('hf_rel_def', 0.1, 0.05)) * (1.0 - defect_severity))
+            temp_c = ambient_temp + 12.0 + (15.0 + wanderer.get('temp_defect', 0.05, 1.5) + 7.5) * defect_severity
+            z_kurtosis = 3.0 + (wanderer.get('z_kurt_defect', 0.15, 1.8) + 8.5) * kurt_severity
+            peak_freq = max(0.0, 37.5 + (200.0 - 37.5 + wanderer.get('freq_defect', 0.1, 30.0)) * defect_severity)
         else:
             # Normal healthy running
             z_rms = max(0.5, base_rms)
-            z_peak = z_rms * 1.5 + wanderer.get('crest_noise', 0.2, 0.1)
-            hf_rms = z_rms * 0.15
+            z_peak = max(0.0, z_rms * (1.5 + wanderer.get('crest_rel', 0.1, 0.2)) + wanderer.get('crest_noise', 0.2, 0.1))
+            hf_rms = max(0.0, z_rms * (0.15 + wanderer.get('hf_rel', 0.1, 0.05)))
             temp_c = ambient_temp + 12.0 + wanderer.get('temp_noise', 0.1, 1.0)
             z_kurtosis = 3.0 + wanderer.get('kurt2', 0.1, 0.2) # Gaussian normal
-            peak_freq = 37.5 + wanderer.get('freq_norm', 0.1, 5.0) # 1x-2x running speed
+            peak_freq = max(0.0, 37.5 + wanderer.get('freq_norm', 0.1, 5.0)) # 1x-2x running speed
+            
+            # Motor slip drops the fundamental running frequency
+            if voltage_sag:
+                peak_freq = max(0.0, 33.0 + wanderer.get('freq_slip', 0.1, 1.0))
 
-        x_rms = z_rms * 0.7 + wanderer.get('kurt_noise', 0.2, 0.1)
-        x_peak = z_peak * 0.7 + wanderer.get('kurt_noise', 0.2, 0.1)
-        x_kurtosis = z_kurtosis * 0.85 + wanderer.get('kurt_noise', 0.2, 0.1)
+        x_rms = max(0.0, z_rms * (0.7 + wanderer.get('x_rms_rel', 0.1, 0.15)) + wanderer.get('x_rms_noise', 0.2, 0.1))
+        x_peak = max(x_rms, z_peak * (0.7 + wanderer.get('x_peak_rel', 0.1, 0.15)) + wanderer.get('x_peak_noise', 0.2, 0.1))
+        x_kurtosis = z_kurtosis * (0.85 + wanderer.get('x_kurt_rel', 0.1, 0.1)) + wanderer.get('x_kurt_noise', 0.2, 0.1)
 
+    # 5. Ugly Reality (Benign Glitch) — MUST happen BEFORE derived fields
+    # 0.1% chance of a random bump/shock hitting the accelerometer
+    if random.random() < 0.001:
+        z_rms = 25.0
+
+    # Derived fields computed AFTER glitch so the row is internally consistent
     zone = classify_iso_zone(z_rms)
-
-    z_crest = round(z_peak / max(0.01, hf_rms), 2)
-    x_crest = round(x_peak / max(0.01, x_rms * 0.05), 2)
+    z_crest = round(z_peak / max(0.01, z_rms), 2)
+    x_crest = round(x_peak / max(0.01, x_rms), 2)
 
     payload = {
         "device_id": DEVICE_ID,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
         "sensor_type": "vibration_node",
         "data": {
             "z_axis_rms_velocity_mm_sec": round(z_rms, 2),

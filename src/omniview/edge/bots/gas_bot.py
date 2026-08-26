@@ -4,7 +4,7 @@ import random
 import datetime
 from pathlib import Path
 import sys
-from omniview.edge.bots.stochastic import wanderer, PoissonTimer
+from omniview.edge.bots.stochastic import wanderer, sim_clock, PoissonTimer
 
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
@@ -32,11 +32,7 @@ def validate_payload(payload):
         except jsonschema.exceptions.ValidationError as e:
             print(f"Schema Validation Error: {e.message}")
 
-def compute_severity(gas_ppm: float, particle_idx: float) -> str:
-    if gas_ppm > 80.0 or particle_idx > 100.0: return "CRITICAL"
-    if gas_ppm > 30.0 or particle_idx > 50.0:  return "ALARM"
-    if gas_ppm > 15.0 or particle_idx > 20.0:  return "WARNING"
-    return "NORMAL"
+
 
 def _read_edge_state() -> dict:
     state_file = Path(".edge_state.json")
@@ -59,7 +55,7 @@ anomaly_active_until = 0.0
 
 def get_poisson_smoldering():
     global next_anomaly_time, anomaly_active_until
-    now = time.time()
+    now = sim_clock.now()
     if now < anomaly_active_until:
         return True 
     if next_anomaly_time == 0.0:
@@ -73,21 +69,28 @@ def get_poisson_smoldering():
 
 def generate_reading() -> dict:
     global gas_wander, particle_wander, panel_temp, smoldering_active
+    wanderer.end_tick()
 
     edge_state = _read_edge_state()
     current_a = edge_state.get("current_a_avg", 100.0)
     ambient_temp = edge_state.get("ambient_temp_c", 25.0)
+    thermal_pv = edge_state.get("thermal_pv", 25.0)
 
-    # 1. Panel Temperature Physics (I^2R heating)
-    # The electrical panel heats up based on the current flowing through it.
-    ambient_cooling_rate = 0.001
-    heat_coeff = 0.000005
+    # 1. Panel Temperature Physics (I^2R heating + Radiant Heat from Machine)
+    # The electrical panel heats up based on the current flowing through it,
+    # AND absorbs radiant heat from the massive nearby thermal machine.
+    # Calibrated so ~305A (normal load) equilibrates ~38°C, well below 65°C threshold.
+    # Only sustained overcurrent or Poisson-triggered smoldering pushes past 65°C.
+    ambient_cooling_rate = 0.008
+    heat_coeff = 0.000001
+    radiant_coeff = 0.00005  # Calibrated: ~0.65°C/tick at 255°C — subtle coupling, not dominant
     
     dt = POLL_INTERVAL
     heat_gained = (current_a ** 2) * heat_coeff * dt
     heat_lost = (panel_temp - ambient_temp) * ambient_cooling_rate * dt
+    radiant_gained = max(0.0, (thermal_pv - panel_temp) * radiant_coeff * dt)
     
-    panel_temp += (heat_gained - heat_lost)
+    panel_temp += (heat_gained - heat_lost + radiant_gained)
     
     # 2. Smoldering Logic (Wire insulation melting)
     is_anomaly = get_poisson_smoldering()
@@ -114,20 +117,34 @@ def generate_reading() -> dict:
         micro_particles = max(0.0, 3.0 + particle_wander)
         rate_of_rise = round(heat_gained - heat_lost, 2)
 
-    severity = compute_severity(gas_ppm, micro_particles)
 
-    if severity in ["ALARM", "CRITICAL"]:
-        humidity = round(71.0 + wanderer.get('hum_h', 0.1, 5.0), 1)
-    elif severity == "WARNING":
-        humidity = round(57.5 + wanderer.get('hum_m', 0.1, 4.0), 1)
+    # 5. Ugly Reality (Benign Glitch) — MUST happen before derived fields
+    # 0.1% chance of dust blinding the optical sensor or chemical interference
+    if random.random() < 0.001:
+        gas_ppm = 1000.0
+    if random.random() < 0.001:
+        micro_particles = 1000.0
+
+    # Severity derived from internal physical state, not visible sensor columns
+    # (prevents target leakage — model must learn physics, not thresholds)
+    if smoldering_active and panel_temp > 65.0:
+        severity = "CRITICAL"
+    elif smoldering_active:
+        severity = "ALARM"
+    elif panel_temp > 50.0:
+        severity = "WARNING"
     else:
-        humidity = round(46.5 + wanderer.get('hum_l', 0.1, 4.0), 1)
+        severity = "NORMAL"
+
+    # Humidity is an independent environmental variable, NOT derived from severity
+    humidity = round(50.0 + wanderer.get('humidity', 0.05, 2.0), 1)
+    humidity = max(20.0, min(95.0, humidity))  # Clamp to physical range
 
     aqi = min(10, int((gas_ppm / 10.0) + (micro_particles / 25.0)))
 
     payload = {
         "device_id": DEVICE_ID,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
         "sensor_type": "gas_particle_sensor",
         "data": {
             "gas_concentration_ppm": round(gas_ppm, 2),
