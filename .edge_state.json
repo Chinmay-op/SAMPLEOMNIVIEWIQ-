@@ -1,1 +1,1 @@
-{"current_a_avg": 1855.06, "active_power_kw_total": 114.82, "ambient_temp_c": 43.49, "thermal_duty_cycle": 69.46, "thermal_pv": 250.505, "machine_running": true, "last_cycle_time": 21.81, "compressor_running": 0, "pneumatic_pressure": 29.36, "grid_voltage_sag": false, "heater_failed": false}
+{"machine_running": true}

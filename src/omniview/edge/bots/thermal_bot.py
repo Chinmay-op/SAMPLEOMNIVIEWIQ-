@@ -57,7 +57,7 @@ def _write_edge_state(payload: dict, is_anomaly: bool):
 
 
 # --- Live Stochastic PID State ---
-current_pv = 250.0  # Start near setpoint (skip cold-start transient)
+current_pv = 25.0  # Cold start from ambient
 integral_error = 0.0
 prev_error = 0.0
 mv_saturation_streak = 0
@@ -119,21 +119,31 @@ def generate_reading() -> dict:
     # PID will settle at 255°C setpoint with MV ≈ 78% duty (realistic).
     heater_power = 0.06 # degrees per second at 100% duty
     ambient_cooling_rate = 0.0002
-    
     # Add SSR noise to PID output (always — anomaly or not, the controller still runs)
     mv = max(0.0, min(100.0, mv + wanderer.get('mv', 0.2, 1.0)))
     
     if is_anomaly:
         # Heater burnout: PID still runs and MV climbs naturally toward saturation,
-        # but the heating element is physically dead — zero heat generated
+        # 1. Physical Heating/Cooling Logic
+        ambient_cooling_rate = 0.002
         heat_gained = 0.0
     else:
-        heat_gained = (mv / 100.0) * heater_power * dt
+        ambient_cooling_rate = 0.002
+        # Heater outputs max 0.5 C/sec at 100% duty cycle
+        heat_gained = (mv / 100.0) * 0.5 * dt 
         
     heat_lost = (current_pv - ambient_temp) * ambient_cooling_rate * dt
     
     # Update actual temperature
     current_pv += (heat_gained - heat_lost)
+    
+    # Re-calculate stall metrics for logic
+    pv_rate = (heat_gained - heat_lost) / dt if dt > 0 else 0.0  # °C/s
+    pv_stalled = pv_rate < 0.001  # effectively not heating
+    hb = (mv_saturation_streak >= 2) and (sp - current_pv > 3.0) and pv_stalled
+    ssr_fail = hb and (mv >= 99.0) and (random.random() < 0.3)
+    # Only flag loop_burnout if PV has genuinely stalled, not just during startup
+    loop_burnout = (abs(current_pv - sp) > 30.0) and pv_stalled
     
     # 15 min trend
     last_pv_15m.append(current_pv)
@@ -166,7 +176,7 @@ def generate_reading() -> dict:
     # Only flag loop_burnout if PV has genuinely stalled, not just during startup
     loop_burnout = (abs(current_pv - sp) > 30.0) and pv_stalled
 
-    reported_pv = current_pv + random.uniform(-0.5, 0.5)
+    reported_pv = current_pv + wanderer.get('thermal_noise', 0.05, 0.2)
 
     payload = {
         "device_id": DEVICE_ID,

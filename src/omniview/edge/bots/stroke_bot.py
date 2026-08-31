@@ -60,7 +60,6 @@ def _write_edge_state(payload: dict):
 
 current_counter = 1500000
 operating_hours = 8000
-cycle_wander = 0.0
 
 next_anomaly_time = 0.0
 anomaly_active_until = 0.0
@@ -84,25 +83,30 @@ def get_poisson_anomaly():
     return False
 
 def generate_reading() -> dict:
-    global current_counter, operating_hours, cycle_wander
+    global current_counter, operating_hours
     wanderer.end_tick()
     
     is_anomaly = get_poisson_anomaly()
-
-    # AR1 Process for Cycle Time (organic mechanical drift)
-    theta_c = 0.1
-    sigma_c = 0.2
-    cycle_wander = (1 - theta_c) * cycle_wander + random.gauss(0, sigma_c)
     
-    base_cycle_time = 22.0
-    actual_cycle_time = base_cycle_time + cycle_wander
+    edge_state = _read_edge_state()
+    line_pressure = edge_state.get("pneumatic_pressure", 38.0)
+    
+    # Rigid anchor: 15.0s per stroke. If pressure drops below 30 bar, cylinder loses force.
+    if line_pressure < 30.0:
+        base_cycle_time = 16.5
+    else:
+        base_cycle_time = 15.0
+        
+    # Mechanical variance (tight Gaussian noise, NOT a random walk)
+    cycle_noise = random.gauss(0, 0.05)
+    actual_cycle_time = base_cycle_time + cycle_noise
 
     if is_anomaly:
         strokes = 0
         cycle_time = round(actual_cycle_time, 2)
         signal_quality = int(max(0, min(255, 255 - random.expovariate(1/50.0))))
     else:
-        # At 22s/cycle, a 15s poll interval usually has 0 strokes (32%), sometimes 1 (68%).
+        # At 15s/cycle, a 15s poll interval usually has 1 stroke
         strokes = 1 if random.random() < (15.0 / actual_cycle_time) else 0
         cycle_time = round(actual_cycle_time, 2)
         signal_quality = int(max(0, min(255, 253 + wanderer.get('sig_q', 0.2, 1.2))))
@@ -121,7 +125,6 @@ def generate_reading() -> dict:
     device_status = 0 if signal_quality > 180 else 1
 
     # AR1 process for chip temp based on ambient
-    edge_state = _read_edge_state()
     ambient = edge_state.get("ambient_temp_c", 25.0)
     chip_temp = round(ambient + 12.0 + wanderer.get('stroke_chip_temp', 0.1, 0.5), 1)
 

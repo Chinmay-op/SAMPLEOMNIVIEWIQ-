@@ -45,8 +45,8 @@ def _read_edge_state() -> dict:
     return {}
 
 # Live State
-gas_wander = 0.0
-particle_wander = 0.0
+current_gas = 1.2
+current_particles = 3.0
 panel_temp = 35.0
 smoldering_active = False
 
@@ -68,7 +68,7 @@ def get_poisson_smoldering():
     return False
 
 def generate_reading() -> dict:
-    global gas_wander, particle_wander, panel_temp, smoldering_active
+    global current_gas, current_particles, panel_temp, smoldering_active
     wanderer.end_tick()
 
     edge_state = _read_edge_state()
@@ -101,27 +101,35 @@ def generate_reading() -> dict:
     elif panel_temp < 40.0:
         smoldering_active = False
 
-    # 3. Gas & Particle Generation (AR1)
-    theta = 0.05
-    gas_wander = (1 - theta) * gas_wander + random.gauss(0, 0.2)
-    particle_wander = (1 - theta) * particle_wander + random.gauss(0, 0.5)
-
-    if smoldering_active:
-        # VOC gases and particles skyrocket as PVC melts
-        gas_ppm = max(0.0, 30.0 + gas_wander * 5 + 15.0 + wanderer.get('gas_spike', 0.1, 5.0))
-        micro_particles = max(0.0, 50.0 + particle_wander * 5 + 30.0 + wanderer.get('part_spike', 0.1, 10.0))
-        rate_of_rise = round(3.0 + wanderer.get('rise_spike', 0.1, 1.0), 2)
+    # 3. Gas & Particle Generation (Plume Decay)
+    external_anomaly = edge_state.get("ambient_anomaly", False)
+    
+    if smoldering_active or external_anomaly:
+        target_gas = 50.0
+        target_part = 80.0
     else:
-        # Normal baseline offgassing
-        gas_ppm = max(0.0, 1.0 + gas_wander)
-        micro_particles = max(0.0, 3.0 + particle_wander)
-        rate_of_rise = round(heat_gained - heat_lost, 2)
+        target_gas = 1.2
+        target_part = 3.0
+
+    # Exponential plume dynamics (fast fill, slow ventilation decay)
+    if current_gas < target_gas:
+        current_gas += (target_gas - current_gas) * 0.2
+        current_particles += (target_part - current_particles) * 0.2
+    else:
+        current_gas -= (current_gas - target_gas) * 0.05
+        current_particles -= (current_particles - target_part) * 0.05
+
+    # Add gentle organic "plumps" around the baseline
+    gas_ppm = max(0.0, current_gas + wanderer.get('gas_plump', 0.05, 0.15))
+    micro_particles = max(0.0, current_particles + wanderer.get('part_plump', 0.1, 0.5))
+    
+    rate_of_rise = round(heat_gained - heat_lost, 2)
 
 
     # 5. Ugly Reality (Benign Glitch) — MUST happen before derived fields
-    # 0.1% chance of dust blinding the optical sensor or chemical interference
-    if random.random() < 0.001:
-        gas_ppm = 1000.0
+    # Disabled the 1000 PPM glitch because it completely destroys graph scaling (zooms Y-axis out too far).
+    # if random.random() < 0.001:
+    #     gas_ppm = 1000.0
     if random.random() < 0.001:
         micro_particles = 1000.0
 

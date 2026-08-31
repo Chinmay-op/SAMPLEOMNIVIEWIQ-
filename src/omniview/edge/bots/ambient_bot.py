@@ -63,9 +63,7 @@ def _write_edge_state(payload: dict):
     except Exception as e:
         print(f"Failed to write edge state: {e}")
 
-# Ornstein-Uhlenbeck (AR1) states for organic wandering
-temp_wander = 0.0
-rh_wander = 0.0
+# Ambient states are now fully driven by smooth sine waves and wanderer
 
 def generate_reading() -> dict:
     global temp_wander, rh_wander
@@ -73,22 +71,14 @@ def generate_reading() -> dict:
     now = datetime.datetime.fromtimestamp(sim_clock.now())
     time_in_hours = now.hour + (now.minute / 60.0)
     
-    # Pune climate baseline (Stochastically drifting amplitude and offset)
-    day_offset = wanderer.get("day_offset", 0.005, 1.0)
-    amp_offset = wanderer.get("amp_offset", 0.005, 0.5)
-    
     phase = (time_in_hours - 14.0) / 24.0 * 2 * math.pi
-    base_temp = (30.0 + day_offset) + (math.cos(phase) * (8.0 + amp_offset))
-    base_rh = 60.0 - (math.cos(phase) * 20.0)
+    base_temp = 40.0 + (math.cos(phase) * 10.0)
+    base_rh = 40.0 - (math.cos(phase) * 15.0)
     
-    # True stochastic wandering (AR1)
-    theta_t = 0.05 # Reversion speed
-    sigma_t = 0.2  # Volatility
-    temp_wander = (1 - theta_t) * temp_wander + random.gauss(0, sigma_t)
-    
-    theta_rh = 0.05
-    sigma_rh = 0.8
-    rh_wander = (1 - theta_rh) * rh_wander + random.gauss(0, sigma_rh)
+    # True stochastic wandering (smooth AR1)
+    # Tightened so it hugs the sine wave without wandering off wildly
+    temp_wander = wanderer.get("ambient_t", 0.1, 0.2)
+    rh_wander = wanderer.get("ambient_rh", 0.1, 0.5)
     
     temp_c = base_temp + temp_wander
     rh_pct = max(0, min(100, base_rh + rh_wander))
