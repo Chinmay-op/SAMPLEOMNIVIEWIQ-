@@ -97,8 +97,9 @@ def generate_reading() -> dict:
     else:
         base_cycle_time = 15.0
         
-    # Mechanical variance (tight Gaussian noise, NOT a random walk)
-    cycle_noise = random.gauss(0, 0.05)
+    # Mechanical variance (extremely tight Gaussian noise for rigid flat bands)
+    # Real injection molders hold cycle time within +/- 0.03s
+    cycle_noise = random.gauss(0, 0.015)
     actual_cycle_time = base_cycle_time + cycle_noise
 
     if is_anomaly:

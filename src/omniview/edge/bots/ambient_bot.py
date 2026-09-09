@@ -72,15 +72,26 @@ def generate_reading() -> dict:
     time_in_hours = now.hour + (now.minute / 60.0)
     
     phase = (time_in_hours - 14.0) / 24.0 * 2 * math.pi
-    base_temp = 40.0 + (math.cos(phase) * 10.0)
+    # Pune typical temperature: 21C to 29C
+    base_temp = 25.0 + (math.cos(phase) * 4.0)
     base_rh = 40.0 - (math.cos(phase) * 15.0)
     
-    # True stochastic wandering (smooth AR1)
-    # Tightened so it hugs the sine wave without wandering off wildly
-    temp_wander = wanderer.get("ambient_t", 0.1, 0.2)
-    rh_wander = wanderer.get("ambient_rh", 0.1, 0.5)
+    # Weather perturbations to break the perfect sine wave:
+    # 1. Cloud cover: randomly dims the heating (drops temp by 1-3C)
+    cloud_cover = wanderer.get("cloud_cover", 0.02, 1.0)
+    # 2. Wind gusts: short-lived cooling events
+    wind_gust = wanderer.get("wind_gust", 0.05, 0.5)
+    # 3. Slow day-to-day baseline drift (monsoon vs dry spell)
+    # Reduced sigma from 1.5 to 0.2 so it stays within realistic seasonal bounds
+    day_drift = wanderer.get("day_drift", 0.002, 0.2)
+    # 4. Random sharp perturbation (rain event, door opening, etc.)
+    rain_event = random.gauss(0, 0.3) if random.random() < 0.05 else 0.0
     
-    temp_c = base_temp + temp_wander
+    # True stochastic wandering (smooth AR1)
+    temp_wander = wanderer.get("ambient_t", 0.05, 0.5)
+    rh_wander = wanderer.get("ambient_rh", 0.05, 1.0)
+    
+    temp_c = base_temp + cloud_cover + wind_gust + day_drift + rain_event + temp_wander
     rh_pct = max(0, min(100, base_rh + rh_wander))
     
     offset = compute_baseline_offset(temp_c)
