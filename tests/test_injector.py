@@ -201,19 +201,20 @@ class TestBuildPayload:
     def test_includes_required_fields(self) -> None:
         from omniview.edge.injector import build_payload
 
-        payload = build_payload({"kva_total": 450.0})
+        payload = build_payload("test-device-01", {"kva_total": 450.0})
         assert "timestamp" in payload
         assert "sensor_type" in payload
         assert payload["sensor_type"] == "electrical"
         assert "schema_version" in payload
         assert "data" in payload
         assert payload["data"]["kva_total"] == 450.0
+        assert payload["device_id"] == "test-device-01"
 
     def test_custom_timestamp(self) -> None:
         from omniview.edge.injector import build_payload
 
         ts = datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc)
-        payload = build_payload({"kva_total": 450.0}, timestamp=ts)
+        payload = build_payload("test-device-01", {"kva_total": 450.0}, timestamp=ts)
         assert payload["timestamp"] == "2026-08-10T12:00:00+00:00"
 
 
