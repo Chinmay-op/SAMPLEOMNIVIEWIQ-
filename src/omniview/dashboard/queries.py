@@ -86,14 +86,17 @@ def get_latest_kva(device_id: str = "pune-comp-mfm384") -> dict[str, Any]:
         }
 
     row = rows[0]
-    kva = _extract_data_field(row, "apparent_power_kva_total")
-    md_pct = _extract_data_field(row, "md_proximity_percent")
+    # V2: use generated column 'kva' directly; fall back to JSONB extraction
+    kva = row.get("kva") if row.get("kva") is not None else _extract_data_field(row, "apparent_power_kva_total")
+    kva = float(kva)
+    # md_proximity is derived — compute from kva rather than extracting
+    md_pct = (kva / CONTRACTED_DEMAND_KVA) * 100 if CONTRACTED_DEMAND_KVA > 0 else 0.0
 
     return {
         "kva": kva,
         "time": row.get("time", _now_ist()),
         "device_id": device_id,
-        "md_proximity_percent": md_pct,
+        "md_proximity_percent": round(md_pct, 2),
         "contract_kva": CONTRACTED_DEMAND_KVA,
     }
 
@@ -119,10 +122,13 @@ def get_kva_timeseries(
 
     records = []
     for r in rows:
+        # V2: prefer generated columns 'kva' and 'kw'; fall back to JSONB
+        kva_val = r.get("kva") if r.get("kva") is not None else _extract_data_field(r, "apparent_power_kva_total")
+        kw_val = r.get("kw") if r.get("kw") is not None else _extract_data_field(r, "active_power_kw_total")
         records.append({
             "time": r["time"],
-            "kva": _extract_data_field(r, "apparent_power_kva_total"),
-            "kw": _extract_data_field(r, "active_power_kw_total"),
+            "kva": float(kva_val),
+            "kw": float(kw_val),
             "pf": _extract_data_field(r, "power_factor_avg", 0.95),
             "device_id": device_id,
         })
@@ -155,7 +161,9 @@ def get_peak_kva_24h(
     for did in device_ids:
         rows = query_by_time_range("electrical", did, start, end)
         for r in rows:
-            kva = _extract_data_field(r, "apparent_power_kva_total")
+            # V2: use generated column 'kva'; fall back to JSONB
+            kva_val = r.get("kva") if r.get("kva") is not None else _extract_data_field(r, "apparent_power_kva_total")
+            kva = float(kva_val)
             if kva > peak:
                 peak = kva
 
@@ -288,16 +296,9 @@ def get_idle_load_percent(
 
     for r in elec_rows:
         current = _extract_data_field(r, "current_a_avg")
-        data = r.get("data", {})
-        if isinstance(data, str):
-            import json
-            try:
-                data = json.loads(data)
-            except (json.JSONDecodeError, TypeError):
-                data = {}
 
-        # Check scenario label for definitive idle detection
-        scenario = data.get("scenario_label", "")
+        # Check scenario label from native column (not JSONB)
+        scenario = r.get("scenario_label", "") or ""
         if scenario == "lazy_idle":
             idle_readings += 1
         elif current < IDLE_CURRENT_THRESHOLD_A:
@@ -383,15 +384,8 @@ def get_alerts(
                 continue
 
             for r in rows:
-                data = r.get("data", {})
-                if isinstance(data, str):
-                    import json
-                    try:
-                        data = json.loads(data)
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-
-                label = data.get("scenario_label")
+                # scenario_label is a native column, not inside JSONB
+                label = r.get("scenario_label")
                 if label and label in _SCENARIO_META:
                     meta = _SCENARIO_META[label]
                     alerts.append({

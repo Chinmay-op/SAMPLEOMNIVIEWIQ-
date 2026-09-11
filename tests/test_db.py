@@ -146,6 +146,42 @@ class TestInsertReading:
         assert result is True
 
     @patch("omniview.ingest.db.get_engine")
+    def test_passes_scenario_label_to_sql(
+        self, mock_get_engine: MagicMock
+    ) -> None:
+        """Verify scenario_label is written as a native column, not inside JSONB."""
+        from omniview.ingest.db import insert_reading
+
+        mock_result = MagicMock()
+        mock_result.rowcount = 1
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_result
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_engine = MagicMock()
+        mock_engine.begin.return_value = mock_conn
+        mock_get_engine.return_value = mock_engine
+
+        result = insert_reading(
+            sensor_type="electrical",
+            device_id="compressor-01",
+            site_id="pune-isbm",
+            time=datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc),
+            data={"active_power_kw_total": 140.2},
+            scenario_label="md_nearmiss",
+        )
+        assert result is True
+
+        # Verify the SQL params include scenario_label
+        call_args = mock_conn.execute.call_args
+        params = call_args[0][1]  # second positional arg is the params dict
+        assert params["scenario_label"] == "md_nearmiss"
+
+        # Verify the SQL text includes scenario_label column
+        sql_text = str(call_args[0][0])
+        assert "scenario_label" in sql_text
+
+    @patch("omniview.ingest.db.get_engine")
     def test_returns_false_on_duplicate(
         self, mock_get_engine: MagicMock
     ) -> None:

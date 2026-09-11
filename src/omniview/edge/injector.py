@@ -57,6 +57,7 @@ from omniview.config import (
 )
 from omniview.edge.mqtt_client import OmniViewMQTTClient
 from omniview.edge.topics import build_topic
+from omniview.edge.bots import generate_electrical
 
 logger = logging.getLogger(__name__)
 
@@ -357,6 +358,7 @@ def generate_synthetic_readings(
 
 
 def build_payload(
+    device_id: str,
     data: dict[str, Any],
     timestamp: datetime | None = None,
     schema_version: str = "1.0",
@@ -365,6 +367,8 @@ def build_payload(
 
     Parameters
     ----------
+    device_id : str
+        The unique device identifier (e.g. pune-comp-mfm384).
     data : dict
         Electrical reading data.
     timestamp : datetime, optional
@@ -380,6 +384,7 @@ def build_payload(
     """
     ts = timestamp or datetime.now(timezone.utc)
     return {
+        "device_id": device_id,
         "timestamp": ts.isoformat(),
         "sensor_type": "electrical",
         "schema_version": schema_version,
@@ -499,12 +504,37 @@ class ElectricalInjector:
             max_readings or "∞",
         )
 
-        for i, data in enumerate(generate_synthetic_readings()):
+        # Import the new bot directly
+        for i in range(max_readings or 999999999):
             if self._stop:
                 break
-            if max_readings is not None and i >= max_readings:
-                break
-            self._publish_one(client, data)
+
+            # The bot returns a fully formed payload (matching the new strict schema)
+            payload = generate_electrical()
+            
+            # Override device_id based on node
+            device_id = "pune-comp-mfm384" if self.node_id == "compressor-01" else f"pune-{self.node_id}-mfm384"
+            payload["device_id"] = device_id
+            
+            client.publish(self.topic, payload)
+            self._published += 1
+
+            if self._published % 50 == 0 or self._published == 1:
+                kva = payload["data"].get("apparent_power_kva_total", "?")
+                kw = payload["data"].get("active_power_kw_total", "?")
+                pf = payload["data"].get("power_factor_avg", "?")
+                logger.info(
+                    "[%d] Published → %s | kVA=%s kW=%s PF=%s",
+                    self._published,
+                    self.topic,
+                    kva,
+                    kw,
+                    pf,
+                )
+
+            if not self.burst:
+                delay = self.interval / self.speed
+                time.sleep(delay)
 
         logger.info("Synthetic replay finished: %d messages published", self._published)
         return self._published
@@ -513,7 +543,9 @@ class ElectricalInjector:
         self, client: OmniViewMQTTClient, data: dict[str, Any]
     ) -> None:
         """Publish a single reading and sleep for the configured interval."""
-        payload = build_payload(data)
+        # Map node_id to the specific electrical device_id for this POC
+        device_id = "pune-comp-mfm384" if self.node_id == "compressor-01" else f"pune-{self.node_id}-mfm384"
+        payload = build_payload(device_id, data)
         client.publish(self.topic, payload)
         self._published += 1
 

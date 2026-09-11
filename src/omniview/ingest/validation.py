@@ -46,6 +46,12 @@ _SCHEMAS = {
 def validate_payload(sensor_type: str, schema_version: str, payload: dict[str, Any]) -> bool:
     """Validate a sensor payload against its corresponding JSON schema.
 
+    Strips envelope-level transport fields (``scenario_label``,
+    ``schema_version``) before validation — these are not part of the
+    raw telemetry schema but are added by the ingestion pipeline and
+    rule engine.  The JSON schemas enforce ``additionalProperties: false``
+    and must NOT be modified to accommodate transport fields.
+
     Parameters
     ----------
     sensor_type : str
@@ -68,9 +74,14 @@ def validate_payload(sensor_type: str, schema_version: str, payload: dict[str, A
         # through so we don't block development on other sensors.
         logger.debug("No schema defined for sensor_type %r, allowing payload.", sensor_type)
         return True
+
+    # Strip envelope-level transport fields before validation.
+    # These are not part of the raw telemetry contract.
+    _ENVELOPE_FIELDS = {"scenario_label", "schema_version"}
+    clean_payload = {k: v for k, v in payload.items() if k not in _ENVELOPE_FIELDS}
         
     try:
-        jsonschema.validate(instance=payload, schema=schema)
+        jsonschema.validate(instance=clean_payload, schema=schema)
         return True
     except ValidationError as e:
         logger.warning(

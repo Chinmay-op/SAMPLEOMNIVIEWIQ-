@@ -164,9 +164,10 @@ def _inject_md_nearmiss(
     data["current_a_avg"] = round(current, 2)
     data["rolling_kva_15min"] = round(kva + random.uniform(-5, 5), 2)
     data["md_proximity_percent"] = round((kva / 500.0) * 100, 2)
-    data["scenario_label"] = "md_nearmiss"
 
-    return {**reading, "data": data}
+    result = {**reading, "data": data}
+    result["scenario_label"] = "md_nearmiss"
+    return result
 
 
 def _inject_lazy_idle_electrical(
@@ -178,8 +179,9 @@ def _inject_lazy_idle_electrical(
     data["active_power_kw_total"] = round(random.uniform(1.5, 4.0), 2)
     data["apparent_power_kva_total"] = round(random.uniform(2.0, 5.0), 2)
     data["power_factor_avg"] = round(random.uniform(0.4, 0.6), 3)
-    data["scenario_label"] = "lazy_idle"
-    return {**reading, "data": data}
+    result = {**reading, "data": data}
+    result["scenario_label"] = "lazy_idle"
+    return result
 
 
 def _inject_lazy_idle_thermal(
@@ -194,8 +196,9 @@ def _inject_lazy_idle_thermal(
         data["process_variable_c"] = round(random.uniform(240.0, 258.0), 1)
     elif "temperature_c" in data:
         data["temperature_c"] = round(random.uniform(240.0, 258.0), 1)
-    data["scenario_label"] = "lazy_idle"
-    return {**reading, "data": data}
+    result = {**reading, "data": data}
+    result["scenario_label"] = "lazy_idle"
+    return result
 
 
 def _inject_leak_proxy(
@@ -218,9 +221,10 @@ def _inject_leak_proxy(
         data["pressure_psi"] = round(pressure * 14.5038, 2)
     elif "discharge_pressure_bar" in data:
         data["discharge_pressure_bar"] = round(pressure, 2)
-    data["scenario_label"] = "leak_proxy"
 
-    return {**reading, "data": data}
+    result = {**reading, "data": data}
+    result["scenario_label"] = "leak_proxy"
+    return result
 
 
 # ── Timeline generation ─────────────────────────────────────────────────

@@ -114,6 +114,7 @@ class TSDBInserter:
         time: datetime,
         data: dict[str, Any],
         schema_version: str = "1.0",
+        scenario_label: str | None = None,
     ) -> bool:
         """Insert a single reading and update metrics.
 
@@ -138,6 +139,7 @@ class TSDBInserter:
                 time=time,
                 data=data,
                 schema_version=schema_version,
+                scenario_label=scenario_label,
                 engine=self._engine,
             )
             with self._lock:

@@ -193,7 +193,7 @@ class TestScenarioInjection:
 
         md_readings = [
             r for r in readings
-            if r["data"].get("scenario_label") == "md_nearmiss"
+            if r.get("scenario_label") == "md_nearmiss"
         ]
         assert len(md_readings) > 0
 
@@ -217,7 +217,7 @@ class TestScenarioInjection:
 
         md_readings = [
             r for r in readings
-            if r["data"].get("scenario_label") == "md_nearmiss"
+            if r.get("scenario_label") == "md_nearmiss"
         ]
         for r in md_readings:
             assert r["data"]["apparent_power_kva_total"] >= 350
@@ -237,7 +237,7 @@ class TestScenarioInjection:
 
         idle_readings = [
             r for r in readings
-            if r["data"].get("scenario_label") == "lazy_idle"
+            if r.get("scenario_label") == "lazy_idle"
         ]
         assert len(idle_readings) > 0
 
@@ -259,7 +259,7 @@ class TestScenarioInjection:
 
         idle_readings = [
             r for r in readings
-            if r["data"].get("scenario_label") == "lazy_idle"
+            if r.get("scenario_label") == "lazy_idle"
         ]
         assert len(idle_readings) == 0
 
@@ -278,7 +278,7 @@ class TestScenarioInjection:
 
         leak_readings = [
             r for r in readings
-            if r["data"].get("scenario_label") == "leak_proxy"
+            if r.get("scenario_label") == "leak_proxy"
         ]
         assert len(leak_readings) > 0
 
@@ -297,7 +297,7 @@ class TestScenarioInjection:
 
         labeled = [
             r for r in readings
-            if "scenario_label" in r.get("data", {})
+            if r.get("scenario_label") is not None
         ]
         assert len(labeled) == 0
 

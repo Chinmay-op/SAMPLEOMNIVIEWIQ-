@@ -87,6 +87,63 @@ class TestOnSensorMessage:
         assert stats["inserted"] == 1
 
     @patch("omniview.ingest.subscriber.insert_reading")
+    def test_scenario_label_extracted_from_envelope(
+        self, mock_insert: MagicMock
+    ) -> None:
+        """scenario_label should be read from the envelope, not from data."""
+        from omniview.ingest.subscriber import _on_sensor_message
+
+        mock_insert.return_value = True
+
+        payload = {
+            "device_id": "compressor-01",
+            "timestamp": "2026-08-10T12:00:00+00:00",
+            "sensor_type": "electrical_meter",
+            "schema_version": "1.0",
+            "scenario_label": "md_nearmiss",
+            "data": {
+                "voltage_v_ll_avg": 414.8,
+                "voltage_v_l1_n": 240.1,
+                "voltage_v_l2_n": 239.2,
+                "voltage_v_l3_n": 239.2,
+                "current_a_avg": 205.3,
+                "current_a_l1": 206.1,
+                "current_a_l2": 204.5,
+                "current_a_l3": 205.3,
+                "current_a_neutral": 0.3,
+                "active_power_kw_total": 140.2,
+                "active_power_kw_l1": 46.8,
+                "active_power_kw_l2": 46.7,
+                "active_power_kw_l3": 46.7,
+                "apparent_power_kva_total": 147.6,
+                "reactive_power_kvar_total": 45.8,
+                "power_factor_avg": 0.949,
+                "power_factor_l1": 0.950,
+                "power_factor_l2": 0.948,
+                "power_factor_l3": 0.949,
+                "frequency_hz": 50.02,
+                "voltage_thd_percent": 2.5,
+                "current_thd_percent": 11.2,
+                "active_energy_kwh": 150042.5,
+                "apparent_energy_kvah": 157544.6,
+                "delta_active_energy_kwh": 0.58,
+                "delta_apparent_energy_kvah": 0.61,
+                "rolling_kva_15min": 148.1,
+            },
+        }
+
+        _on_sensor_message(
+            "omniview/pune-isbm/compressor-01/electrical", payload
+        )
+
+        mock_insert.assert_called_once()
+        call_kwargs = mock_insert.call_args.kwargs
+        # Label extracted from envelope, not from data
+        assert call_kwargs["scenario_label"] == "md_nearmiss"
+        # Label must NOT be inside data
+        assert "scenario_label" not in call_kwargs["data"]
+
+    @patch("omniview.ingest.subscriber.insert_reading")
     def test_duplicate_increments_duplicate_counter(
         self, mock_insert: MagicMock
     ) -> None:

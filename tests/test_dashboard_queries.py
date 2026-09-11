@@ -51,8 +51,6 @@ def _make_elec_row(
         "power_factor_avg": pf,
         "md_proximity_percent": (kva / 500) * 100,
     }
-    if scenario_label:
-        data["scenario_label"] = scenario_label
     return {
         "time": t,
         "device_id": device_id,
@@ -60,6 +58,7 @@ def _make_elec_row(
         "sensor_type": "electrical",
         "schema_version": "1.0",
         "data": data,
+        "scenario_label": scenario_label,
     }
 
 
@@ -101,8 +100,6 @@ def _make_pressure_row(
 ) -> dict:
     t = datetime(2026, 8, 18, 10, 0, 0, tzinfo=IST) + timedelta(minutes=time_offset_min)
     data = {"pressure_bar": pressure}
-    if scenario_label:
-        data["scenario_label"] = scenario_label
     return {
         "time": t,
         "device_id": "pune-comp-wika01",
@@ -110,6 +107,7 @@ def _make_pressure_row(
         "sensor_type": "pressure",
         "schema_version": "1.0",
         "data": data,
+        "scenario_label": scenario_label,
     }
 
 

@@ -142,6 +142,8 @@ def _on_sensor_message(topic: str, payload: dict[str, Any]) -> None:
     # -- Extract data payload -------------------------------------------------
     data = payload.get("data", payload)
     schema_version = str(payload.get("schema_version", "1.0"))
+    scenario_label = payload.get("scenario_label")  # sibling to data, not inside it
+    device_id = payload.get("device_id", parsed.node_id)
 
     # -- Validate Payload -----------------------------------------------------
     if not validate_payload(parsed.sensor_type, schema_version, payload):
@@ -154,11 +156,12 @@ def _on_sensor_message(topic: str, payload: dict[str, Any]) -> None:
     try:
         inserted = insert_reading(
             sensor_type=parsed.sensor_type,
-            device_id=parsed.node_id,
+            device_id=device_id,
             site_id=parsed.site_id,
             time=ts,
             data=data,
             schema_version=schema_version,
+            scenario_label=scenario_label,
         )
         with _stats_lock:
             if inserted:

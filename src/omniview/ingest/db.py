@@ -243,6 +243,7 @@ def insert_reading(
     time: datetime,
     data: dict[str, Any],
     schema_version: str = "1.0",
+    scenario_label: str | None = None,
     engine: Engine | None = None,
 ) -> bool:
     """Insert a single sensor reading (idempotent).
@@ -265,6 +266,9 @@ def insert_reading(
         Sensor payload as a dictionary (stored as JSONB).
     schema_version : str
         Schema version tag (default ``"1.0"``).
+    scenario_label : str, optional
+        Rule-engine scenario label (e.g. ``"md_nearmiss"``).  Written
+        as a native column — never injected into the JSONB ``data``.
     engine : Engine, optional
         Override the default engine.
 
@@ -292,9 +296,10 @@ def insert_reading(
         result = conn.execute(
             text(f"""
                 INSERT INTO {tbl} (time, device_id, site_id, sensor_type,
-                                   schema_version, data)
+                                   schema_version, data, scenario_label)
                 VALUES (:time, :device_id, :site_id, :sensor_type,
-                        :schema_version, CAST(:data AS jsonb))
+                        :schema_version, CAST(:data AS jsonb),
+                        :scenario_label)
                 ON CONFLICT (device_id, time) DO NOTHING
             """),
             {
@@ -304,6 +309,7 @@ def insert_reading(
                 "sensor_type": sensor_type,
                 "schema_version": schema_version,
                 "data": json.dumps(data, default=str),
+                "scenario_label": scenario_label,
             },
         )
         inserted = result.rowcount > 0
@@ -376,7 +382,7 @@ def insert_readings_batch(
             value_clauses.append(
                 f"(:time{suffix}, :device_id{suffix}, :site_id{suffix}, "
                 f":sensor_type{suffix}, :schema_version{suffix}, "
-                f"CAST(:data{suffix} AS jsonb))"
+                f"CAST(:data{suffix} AS jsonb), :scenario_label{suffix})"
             )
             params.append({
                 f"time{suffix}": r["time"],
@@ -385,6 +391,7 @@ def insert_readings_batch(
                 f"sensor_type{suffix}": sensor_type,
                 f"schema_version{suffix}": r.get("schema_version", "1.0"),
                 f"data{suffix}": json.dumps(r["data"], default=str),
+                f"scenario_label{suffix}": r.get("scenario_label"),
             })
 
         # Flatten params into a single dict
@@ -394,7 +401,7 @@ def insert_readings_batch(
 
         sql = (
             f"INSERT INTO {tbl} (time, device_id, site_id, sensor_type, "
-            f"schema_version, data) VALUES "
+            f"schema_version, data, scenario_label) VALUES "
             + ", ".join(value_clauses)
             + " ON CONFLICT (device_id, time) DO NOTHING"
         )
@@ -482,7 +489,7 @@ def backfill_insert(
             value_clauses.append(
                 f"(:time{suffix}, :device_id{suffix}, :site_id{suffix}, "
                 f":sensor_type{suffix}, :schema_version{suffix}, "
-                f"CAST(:data{suffix} AS jsonb))"
+                f"CAST(:data{suffix} AS jsonb), :scenario_label{suffix})"
             )
             params.append({
                 f"time{suffix}": r["time"],
@@ -491,6 +498,7 @@ def backfill_insert(
                 f"sensor_type{suffix}": sensor_type,
                 f"schema_version{suffix}": r.get("schema_version", "1.0"),
                 f"data{suffix}": json.dumps(r["data"], default=str),
+                f"scenario_label{suffix}": r.get("scenario_label"),
             })
 
         flat_params: dict[str, Any] = {}
@@ -499,7 +507,7 @@ def backfill_insert(
 
         sql = (
             f"INSERT INTO {tbl} (time, device_id, site_id, sensor_type, "
-            f"schema_version, data) VALUES "
+            f"schema_version, data, scenario_label) VALUES "
             + ", ".join(value_clauses)
             + " ON CONFLICT (device_id, time) DO NOTHING"
         )
@@ -554,7 +562,8 @@ def query_latest(
     -------
     list[dict]
         Each dict contains ``time``, ``device_id``, ``site_id``,
-        ``sensor_type``, ``schema_version``, and ``data``.
+        ``sensor_type``, ``schema_version``, ``data``, and any
+        V2 generated columns (e.g. ``kva``, ``kw``, ``z_rms``).
     """
     if sensor_type not in SENSOR_TYPES:
         raise ValueError(
@@ -569,7 +578,7 @@ def query_latest(
         rows = conn.execute(
             text(f"""
                 SELECT time, device_id, site_id, sensor_type,
-                       schema_version, data
+                       schema_version, data, scenario_label
                   FROM {tbl}
                  WHERE device_id = :device_id
                  ORDER BY time DESC
@@ -640,7 +649,7 @@ def query_by_time_range(
         rows = conn.execute(
             text(f"""
                 SELECT time, device_id, site_id, sensor_type,
-                       schema_version, data
+                       schema_version, data, scenario_label
                   FROM {tbl}
                  WHERE device_id = :device_id
                    AND time >= :start
