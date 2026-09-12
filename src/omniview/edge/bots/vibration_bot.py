@@ -168,7 +168,8 @@ def generate_reading() -> dict:
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
-        "sensor_type": "vibration_node",
+        "sensor_type": "vibration",
+        "schema_version": "1.0",
         "data": {
             "z_axis_rms_velocity_mm_sec": round(z_rms, 2),
             "x_axis_rms_velocity_mm_sec": round(x_rms, 2),

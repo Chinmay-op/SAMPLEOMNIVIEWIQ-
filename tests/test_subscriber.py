@@ -39,7 +39,8 @@ class TestOnSensorMessage:
         payload = {
             "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "sensor_type": "electrical_meter",
+            "sensor_type": "electrical",
+            "schema_version": "1.0",
             "data": {
                 "voltage_v_ln_avg": 239.5,
                 "voltage_v_ll_avg": 414.8,
@@ -66,7 +67,6 @@ class TestOnSensorMessage:
                 "current_thd_percent": 11.2,
                 "active_energy_kwh": 150042.5,
                 "apparent_energy_kvah": 157544.6,
-                "rolling_kva_15min": 148.1,
                 "md_proximity_percent": 29.6,
             },
         }
@@ -97,7 +97,8 @@ class TestOnSensorMessage:
         payload = {
             "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "sensor_type": "electrical_meter",
+            "sensor_type": "electrical",
+            "schema_version": "1.0",
             "data": {
                 "voltage_v_ln_avg": 239.5,
                 "voltage_v_ll_avg": 414.8,
@@ -124,7 +125,6 @@ class TestOnSensorMessage:
                 "current_thd_percent": 11.2,
                 "active_energy_kwh": 150042.5,
                 "apparent_energy_kvah": 157544.6,
-                "rolling_kva_15min": 148.1,
                 "md_proximity_percent": 29.6,
             },
         }
@@ -223,7 +223,8 @@ class TestOnSensorMessage:
         payload = {
             "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "sensor_type": "electrical_meter",
+            "sensor_type": "electrical",
+            "schema_version": "1.0",
             "data": {
                 "voltage_v_ln_avg": 239.5,
                 "voltage_v_ll_avg": 414.8,
@@ -235,7 +236,6 @@ class TestOnSensorMessage:
                 "frequency_hz": 50.02,
                 "active_energy_kwh": 150042.5,
                 "apparent_energy_kvah": 157544.6,
-                "rolling_kva_15min": 148.1,
                 "md_proximity_percent": 29.6,
             },
         }
@@ -263,7 +263,7 @@ class TestOnSensorMessage:
         payload = {
             "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "sensor_type": "electrical_meter",
+            "sensor_type": "electrical",
             "apparent_power_kva_total": 147.6,
             "active_power_kw_total": 140.2,
         }
@@ -284,7 +284,8 @@ class TestOnSensorMessage:
         payload = {
             "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
-            "sensor_type": "electrical_meter",
+            "sensor_type": "electrical",
+            "schema_version": "1.0",
             "data": {"apparent_power_kva_total": 147.6},
         }
 

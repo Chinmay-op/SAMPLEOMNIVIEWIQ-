@@ -101,7 +101,8 @@ def process_mat_file(file_path: Path, label: str):
         payload = {
             "device_id": DEVICE_ID,
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-            "sensor_type": "vibration_node",
+            "sensor_type": "vibration",
+            "schema_version": "1.0",
             "data": {
                 "data_source": "CWRU",
                 "z_axis_rms_velocity_mm_sec": vel_rms,

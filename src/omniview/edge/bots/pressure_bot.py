@@ -168,7 +168,8 @@ def generate_reading() -> dict:
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
-        "sensor_type": "pressure_transmitter",
+        "sensor_type": "pressure",
+        "schema_version": "1.0",
         "data": {
             "process_data_variable_raw": pdv_raw,
             "pressure_bar": round(reported_pressure, 2),

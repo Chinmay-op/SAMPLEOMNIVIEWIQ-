@@ -153,7 +153,8 @@ def generate_reading() -> dict:
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
-        "sensor_type": "gas_particle_sensor",
+        "sensor_type": "gas",
+        "schema_version": "1.0",
         "data": {
             "gas_concentration_ppm": round(gas_ppm, 2),
             "micro_particle_index": round(micro_particles, 2),

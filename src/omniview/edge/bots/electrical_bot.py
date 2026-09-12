@@ -163,7 +163,10 @@ def generate_reading() -> dict:
     thd_v = round(2.0 + load_ratio * 3.0 + wanderer.get('thd_v', 0.1, 0.2), 2)
     thd_i = round(5.0 + load_ratio * 10.0 + wanderer.get('thd_i', 0.1, 0.4), 2)
 
-    rolling_kva = kva + wanderer.get('kva', 0.1, 2.0)
+    # NOTE: rolling_kva is an edge-local diagnostic only.
+    # Per contract §4.1, window math (rolling averages) happens server-side
+    # in TSDB continuous aggregates, NOT on the edge.
+    # rolling_kva = kva + wanderer.get('kva', 0.1, 2.0)
 
     delta_kwh = kw * (POLL_INTERVAL / 3600.0)
     delta_kvah = kva * (POLL_INTERVAL / 3600.0)
@@ -180,7 +183,8 @@ def generate_reading() -> dict:
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
-        "sensor_type": "electrical_meter",
+        "sensor_type": "electrical",
+        "schema_version": "1.0",
         "data": {
             "voltage_v_ll_avg": round(voltage_ll, 2),
             "voltage_v_l1_n": round(v_l1, 2),
@@ -207,8 +211,7 @@ def generate_reading() -> dict:
             "active_energy_kwh": round(cumulative_kwh, 2),
             "apparent_energy_kvah": round(cumulative_kvah, 2),
             "delta_active_energy_kwh": round(delta_kwh, 4),
-            "delta_apparent_energy_kvah": round(delta_kvah, 4),
-            "rolling_kva_15min": round(rolling_kva, 2)
+            "delta_apparent_energy_kvah": round(delta_kvah, 4)
         }
     }
     
@@ -233,7 +236,8 @@ def map_csv_row_to_payload(row):
     payload = {
         "device_id": row.get("device_id", DEVICE_ID),
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-        "sensor_type": "electrical_meter",
+        "sensor_type": "electrical",
+        "schema_version": "1.0",
         "data": {
             "voltage_v_ln_avg": round(voltage_ll / 1.732, 2),
             "voltage_v_ll_avg": round(voltage_ll, 2),
@@ -245,7 +249,6 @@ def map_csv_row_to_payload(row):
             "frequency_hz": cast_or_default(row.get("frequency_hz", 50.0), float),
             "active_energy_kwh": cast_or_default(row.get("active_energy_kwh", 150000.0), float),
             "apparent_energy_kvah": cast_or_default(row.get("apparent_energy_kvah", 158000.0), float),
-            "rolling_kva_15min": cast_or_default(row.get("rolling_kva_15min", 85.0), float),
             "md_proximity_percent": cast_or_default(row.get("md_proximity_percent", 50.0), float)
         }
     }

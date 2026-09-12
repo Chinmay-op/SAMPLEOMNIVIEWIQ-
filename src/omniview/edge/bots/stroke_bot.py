@@ -132,7 +132,8 @@ def generate_reading() -> dict:
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
-        "sensor_type": "digital_pulse_counter",
+        "sensor_type": "stroke",
+        "schema_version": "1.0",
         "data": {
             "switching_state_bdc1": bdc1,
             "switching_state_bdc2": bdc2,

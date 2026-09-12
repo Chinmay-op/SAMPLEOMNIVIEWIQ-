@@ -193,7 +193,8 @@ def generate_reading() -> dict:
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
-        "sensor_type": "thermal_probe",
+        "sensor_type": "thermal",
+        "schema_version": "1.0",
         "data": {
             "present_value_pv_c": round(reported_pv, 3),
             "set_point_sp_c": sp,

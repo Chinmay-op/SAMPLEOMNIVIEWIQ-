@@ -114,7 +114,8 @@ def generate_reading() -> dict:
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": now.isoformat() + "Z",
-        "sensor_type": "ambient_weather",
+        "sensor_type": "ambient",
+        "schema_version": "1.0",
         "data": {
             "ambient_temp_c": round(temp_c, 2),
             "relative_humidity_pct": round(rh_pct, 1),

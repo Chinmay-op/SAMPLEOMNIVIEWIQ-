@@ -6,7 +6,8 @@ from omniview.ingest.validation import validate_payload
 _VALID_ELECTRICAL = {
     "device_id": "Selec-MFM384-01",
     "timestamp": "2026-08-13T17:00:00Z",
-    "sensor_type": "electrical_meter",
+    "sensor_type": "electrical",
+    "schema_version": "1.0",
     "data": {
         "voltage_v_ln_avg": 239.5,
         "voltage_v_ll_avg": 414.8,
@@ -18,7 +19,6 @@ _VALID_ELECTRICAL = {
         "frequency_hz": 50.02,
         "active_energy_kwh": 150042.5,
         "apparent_energy_kvah": 157544.6,
-        "rolling_kva_15min": 148.1,
         "md_proximity_percent": 29.6,
     },
 }
@@ -32,7 +32,8 @@ def test_validate_payload_missing_required():
     # Missing device_id — a required top-level field
     payload = {
         "timestamp": "2026-08-13T17:00:00Z",
-        "sensor_type": "electrical_meter",
+        "sensor_type": "electrical",
+        "schema_version": "1.0",
         "data": _VALID_ELECTRICAL["data"],
     }
     assert validate_payload("electrical", "1.0", payload) is False
@@ -49,7 +50,8 @@ def test_validate_payload_vibration():
     payload = {
         "device_id": "Banner-QM30VT1-01",
         "timestamp": "2026-08-13T17:00:00Z",
-        "sensor_type": "vibration_node",
+        "sensor_type": "vibration",
+        "schema_version": "1.0",
         "data": {
             "z_axis_rms_velocity_mm_sec": 2.1,
             "x_axis_rms_velocity_mm_sec": 1.5,

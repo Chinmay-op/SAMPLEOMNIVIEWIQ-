@@ -45,7 +45,7 @@ def parse_modbus_string(raw_string):
         payload = {
             "device_id": parts[0],
             "timestamp": parts[1],
-            "sensor_type": "electrical_meter",
+            "sensor_type": "electrical",
             "data": {
                 "voltage_v_ln_avg": float(parts[2]),
                 "voltage_v_ll_avg": float(parts[3]),
