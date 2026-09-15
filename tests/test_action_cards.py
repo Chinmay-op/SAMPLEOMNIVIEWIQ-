@@ -452,6 +452,7 @@ class TestTemplateCoverage:
             "leak_proxy",
             "critical_vibration",
             "maintenance_risk",
+            "gas_overheat",
         }
         assert set(CARD_TEMPLATES.keys()) == expected
 

@@ -386,6 +386,101 @@ def _maintenance_risk_fields(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _gas_overheat_fields(event: dict[str, Any]) -> dict[str, Any]:
+    """Template for gas / switchboard overheating (fire precursor) events."""
+    gas_ppm = event.get("gas_concentration_ppm", 0.0)
+    particles = event.get("micro_particle_index", 0.0)
+    panel_temp = event.get("internal_panel_temp_c", 0.0)
+    rise_rate = event.get("rate_of_thermal_rise_c_per_min", 0.0)
+    tier = event.get("tier", "WARNING_TEMP")
+
+    is_critical = tier == "CRITICAL"
+    severity = "CRITICAL" if is_critical else "WARNING"
+
+    if is_critical:
+        title = (
+            "🔥 FIRE PRECURSOR — Switchboard Thermal Rise with "
+            "Gas/Particle Emission"
+        )
+        summary = (
+            f"Switchboard panel temperature is rising at "
+            f"{rise_rate:.1f} °C/min with gas concentration at "
+            f"{gas_ppm:.0f} ppm and micro-particle index at "
+            f"{particles:.0f}. This pattern is consistent with "
+            f"insulation degradation and incipient fire conditions. "
+            f"Panel temperature: {panel_temp:.0f} °C."
+        )
+        recommended_action = (
+            "Immediately isolate the affected switchboard panel by "
+            "opening the upstream breaker from a SAFE distance using "
+            "an insulated operating handle. Do NOT approach until power "
+            "is confirmed OFF. Alert the fire safety officer. Keep a "
+            "CO₂ or dry-chemical extinguisher accessible — do NOT use "
+            "water on an electrical panel fire."
+        )
+        urgency = "Immediate — isolate panel power within 5 minutes"
+        do_not = (
+            "Do NOT open the panel door to inspect — potential arc flash "
+            "hazard. Do NOT attempt to remove cables or components. "
+            "Do NOT use water-based extinguishers. Wait for power "
+            "isolation confirmation before any physical inspection."
+        )
+    else:
+        title = "⚠️ Panel Overheat — Switchboard Temperature Elevated"
+        summary = (
+            f"Switchboard panel temperature has reached {panel_temp:.0f} °C "
+            f"(gas: {gas_ppm:.0f} ppm, particles: {particles:.0f}). "
+            f"While not yet at fire-precursor levels, sustained elevation "
+            f"indicates potential insulation degradation or ventilation "
+            f"issues. Thermal rise rate: {rise_rate:.1f} °C/min."
+        )
+        recommended_action = (
+            "Schedule a thermal imaging inspection of the affected panel "
+            "within the current shift. Check panel ventilation — ensure "
+            "cooling fans are operational and air filters are not blocked. "
+            "Review recent load changes that may have increased panel "
+            "heating. Log the event for maintenance trending."
+        )
+        urgency = "Within current shift — schedule thermal inspection"
+        do_not = (
+            "Do NOT ignore elevated panel temperature readings — "
+            "insulation degradation is progressive and accelerates "
+            "with sustained heat. Do NOT increase panel load until "
+            "the cause is identified."
+        )
+
+    return {
+        "severity": severity,
+        "title": title,
+        "summary": summary,
+        "recommended_action": recommended_action,
+        "do_not": do_not,
+        "rupee_impact": (
+            "Unplanned switchboard failure: ₹2,00,000–5,00,000+ "
+            "(equipment + downtime + safety incident)"
+            if is_critical
+            else "Preventive inspection: ₹2,000–5,000 | "
+            "Panel failure: ₹2,00,000+ (estimated)"
+        ),
+        "urgency_window": urgency,
+        "target_role": "plant_manager",
+        "physical_rationale": (
+            f"Electrical panel insulation (PVC, XLPE) begins outgassing "
+            f"volatile organic compounds at ~80 °C and produces visible "
+            f"micro-particles from cable sheath degradation. A thermal "
+            f"rise rate of {rise_rate:.1f} °C/min with gas at "
+            f"{gas_ppm:.0f} ppm and particles at {particles:.0f} is "
+            f"characteristic of a localised hot-spot — typically a loose "
+            f"connection, overloaded busbar, or deteriorated insulation. "
+            f"The Schneider HeatTag sensor detects these pre-fire "
+            f"indicators 15–30 minutes before visible smoke, providing "
+            f"an actionable warning window. Safety priority (per PRD "
+            f"§5.7 arbitration: Safety > Compliance > Cost) means this "
+            f"event outranks demand or efficiency alerts."
+        ),
+    }
+
+
 # ── Template registry ───────────────────────────────────────────────────
 
 CARD_TEMPLATES: dict[str, Any] = {
@@ -394,6 +489,7 @@ CARD_TEMPLATES: dict[str, Any] = {
     "leak_proxy": _leak_proxy_fields,
     "critical_vibration": _critical_vibration_fields,
     "maintenance_risk": _maintenance_risk_fields,
+    "gas_overheat": _gas_overheat_fields,
 }
 
 # Map scenario_label values to event_type keys (some may differ)
@@ -403,6 +499,7 @@ _SCENARIO_TO_EVENT: dict[str, str] = {
     "leak_proxy": "leak_proxy",
     "critical_vibration": "critical_vibration",
     "maintenance_risk": "maintenance_risk",
+    "gas_overheat": "gas_overheat",
 }
 
 

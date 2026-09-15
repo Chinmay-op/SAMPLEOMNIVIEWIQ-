@@ -12,6 +12,8 @@ Handles communication between the factory floor and the cloud:
 * **offline_buffer** — SQLite offline cache for network outages   (OI-28)
 * **buffer_replay**  — Chronological replay engine                (OI-29)
 * **ntp_guard**      — NTP drift monitor + alert guard            (OI-53)
+* **poller**         — Physical sensor polling daemon            (OI-13)
+* **modbus_stub**    — Modbus RTU stub for hardware cutover      (OI-13)
 * **parsers**        — 7 sensor data parsers (DevB)               (OI-23)
 * **bots**           — 7 live edge simulators (DevB)              (OI-23)
 """
@@ -23,19 +25,25 @@ from omniview.edge.mqtt_client import OmniViewMQTTClient
 from omniview.edge.node_registry import NODES, get_all_topics, get_node
 from omniview.edge.ntp_guard import DriftStatus, NTPDriftGuard, check_drift
 from omniview.edge.offline_buffer import OfflineBuffer
+from omniview.edge.poller import BotSource, PhysicalSensorPoller, PHYSICAL_FAMILIES
+from omniview.edge.modbus_stub import ModbusSource
 from omniview.edge.topics import SENSOR_TYPES, build_topic, parse_topic
 from omniview.edge import parsers  # noqa: F401 — DevB sensor parsers
 from omniview.edge import bots  # noqa: F401 — DevB live edge simulators
 
 __all__ = [
     "BufferReplayEngine",
+    "BotSource",
     "DriftStatus",
     "EdgeConfig",
     "ElectricalInjector",
+    "ModbusSource",
     "NTPDriftGuard",
     "OfflineBuffer",
     "OmniViewMQTTClient",
     "NODES",
+    "PHYSICAL_FAMILIES",
+    "PhysicalSensorPoller",
     "ReplayResult",
     "SENSOR_TYPES",
     "bots",

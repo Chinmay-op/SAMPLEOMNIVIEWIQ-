@@ -6,6 +6,7 @@ Owned by Lead (Dnyandev). Package scaffolded here so cross-imports resolve.
 
 Shipped modules:
 * Action-card generator from rule/PdM events        (OI-69)
+* Gas / switchboard overheat detector                (S1)
 
 Future modules (Lead track):
 * Rolling 15-min kVA + MD trajectory alert  (OI-56)
@@ -21,9 +22,16 @@ from omniview.rules.action_cards import (
     ActionCardGenerator,
     CARD_TEMPLATES,
 )
+from omniview.rules.gas_overheat import (
+    GasOverheatDetector,
+    GasOverheatEvent,
+)
 
 __all__ = [
     "ActionCard",
     "ActionCardGenerator",
     "CARD_TEMPLATES",
+    "GasOverheatDetector",
+    "GasOverheatEvent",
 ]
+
