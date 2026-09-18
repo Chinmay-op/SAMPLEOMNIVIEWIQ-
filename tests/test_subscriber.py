@@ -158,6 +158,7 @@ class TestOnSensorMessage:
             "device_id": "compressor-01",
             "timestamp": "2026-08-10T12:00:00+00:00",
             "sensor_type": "electrical",
+            "schema_version": "1.0",
             "data": {
                 "voltage_v_ll_avg": 414.8,
                 "voltage_v_l1_n": 240.1,

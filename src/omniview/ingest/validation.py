@@ -77,7 +77,9 @@ def validate_payload(sensor_type: str, schema_version: str, payload: dict[str, A
 
     # Strip envelope-level transport fields before validation.
     # These are not part of the raw telemetry contract.
-    _ENVELOPE_FIELDS = {"scenario_label", "schema_version"}
+    # NOTE: schema_version is no longer stripped — DevB's §4.1 schemas
+    # now require it as a top-level field in the envelope contract.
+    _ENVELOPE_FIELDS = {"scenario_label"}
     clean_payload = {k: v for k, v in payload.items() if k not in _ENVELOPE_FIELDS}
         
     try:
