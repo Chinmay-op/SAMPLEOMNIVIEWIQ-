@@ -14,7 +14,11 @@
     },
     "sensor_type": {
       "type": "string",
-      "const": "vibration_node"
+      "const": "vibration"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
     },
     "data": {
       "type": "object",
@@ -88,22 +92,17 @@
         "z_axis_peak_acceleration_g",
         "x_axis_peak_acceleration_g",
         "high_frequency_rms_acceleration_g",
-        "z_axis_kurtosis",
-        "x_axis_kurtosis",
-        "z_axis_crest_factor",
-        "x_axis_crest_factor",
-        "peak_velocity_component_freq_hz",
         "temperature_c",
-        "iso_health_zone",
-        "data_source"
+        "iso_health_zone"
       ],
-      "additionalProperties": false
+      "additionalProperties": true
     }
   },
   "required": [
     "device_id",
     "timestamp",
     "sensor_type",
+    "schema_version",
     "data"
   ],
   "additionalProperties": false

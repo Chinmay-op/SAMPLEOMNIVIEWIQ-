@@ -24,7 +24,7 @@ def test_modbus_parser():
     raw = "Selec-MFM384-01,2026-07-15T10:00:00Z,240.5,416.3,370.0,245.0,265.0,100.0,0.924,50.02,150000.0,158000.0,265.5,53.1"
     result = parse_modbus_string(raw)
     assert result is not None, "modbus parser returned None"
-    assert result["sensor_type"] == "electrical_meter"
+    assert result["sensor_type"] == "electrical"
     assert result["device_id"] == "Selec-MFM384-01"
     assert "voltage_v_ln_avg" in result["data"]
     assert "active_power_kw_total" in result["data"]
@@ -35,7 +35,7 @@ def test_vibration_parser():
     raw = "Banner-QM30VT1-01,2026-07-15T10:00:00Z,2.1,1.5,0.45,0.33,0.38,38.5,ZONE_A"
     result = parse_vibration_string(raw)
     assert result is not None, "vibration parser returned None"
-    assert result["sensor_type"] == "vibration_node"
+    assert result["sensor_type"] == "vibration"
     assert "z_axis_rms_velocity_mm_sec" in result["data"]
     assert "iso_health_zone" in result["data"]
     print("  ✅ vibration_parser OK")

@@ -45,7 +45,7 @@ def parse_vibration_string(raw_string):
         payload = {
             "device_id": parts[0],
             "timestamp": parts[1],
-            "sensor_type": "vibration_node",
+            "sensor_type": "vibration",
             "data": {
                 "z_axis_rms_velocity_mm_sec": float(parts[2]),
                 "x_axis_rms_velocity_mm_sec": float(parts[3]),

@@ -154,14 +154,28 @@ def generate_reading() -> dict:
     z_crest = round(z_peak / max(0.01, z_rms), 2)
     x_crest = round(x_peak / max(0.01, x_rms), 2)
 
+    if edge_state.get("machine_running", True):
+        if is_bearing_defect:
+            rms = random.gauss(12.0, 1.5)
+            accel = random.gauss(0.6, 0.1)
+        else:
+            rms = random.gauss(2.5, 0.4)
+            accel = random.gauss(0.15, 0.03)
+    else:
+        rms = random.gauss(0.1, 0.02)
+        accel = random.gauss(0.01, 0.005)
+
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
-        "sensor_type": "vibration_node",
+        "sensor_type": "vibration",
+        "schema_version": "1.0",
         "data": {
             "z_axis_rms_velocity_mm_sec": round(z_rms, 2),
             "x_axis_rms_velocity_mm_sec": round(x_rms, 2),
             "z_axis_peak_acceleration_g": round(z_peak, 2),
+            "rms_velocity_mm_sec": round(max(0, rms), 2),
+            "peak_acceleration_g": round(max(0, accel), 2),
             "x_axis_peak_acceleration_g": round(x_peak, 2),
             "high_frequency_rms_acceleration_g": round(hf_rms, 2),
             "z_axis_kurtosis": round(z_kurtosis, 2),

@@ -14,7 +14,11 @@
     },
     "sensor_type": {
       "type": "string",
-      "const": "digital_pulse_counter"
+      "const": "stroke"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
     },
     "data": {
       "type": "object",
@@ -79,6 +83,7 @@
     "device_id",
     "timestamp",
     "sensor_type",
+    "schema_version",
     "data"
   ],
   "additionalProperties": false

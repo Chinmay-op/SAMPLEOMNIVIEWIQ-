@@ -5,7 +5,8 @@ import datetime
 import math
 from pathlib import Path
 import sys
-
+import argparse
+import csv
 # Ensure omniview is importable
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
@@ -63,9 +64,7 @@ def _write_edge_state(payload: dict):
     except Exception as e:
         print(f"Failed to write edge state: {e}")
 
-# Ornstein-Uhlenbeck (AR1) states for organic wandering
-temp_wander = 0.0
-rh_wander = 0.0
+# Ambient states are now fully driven by smooth sine waves and wanderer
 
 def generate_reading() -> dict:
     global temp_wander, rh_wander
@@ -73,24 +72,27 @@ def generate_reading() -> dict:
     now = datetime.datetime.fromtimestamp(sim_clock.now())
     time_in_hours = now.hour + (now.minute / 60.0)
     
-    # Pune climate baseline (Stochastically drifting amplitude and offset)
-    day_offset = wanderer.get("day_offset", 0.005, 1.0)
-    amp_offset = wanderer.get("amp_offset", 0.005, 0.5)
-    
     phase = (time_in_hours - 14.0) / 24.0 * 2 * math.pi
-    base_temp = (30.0 + day_offset) + (math.cos(phase) * (8.0 + amp_offset))
-    base_rh = 60.0 - (math.cos(phase) * 20.0)
+    # Pune typical temperature: 21C to 29C
+    base_temp = 25.0 + (math.cos(phase) * 4.0)
+    base_rh = 40.0 - (math.cos(phase) * 15.0)
     
-    # True stochastic wandering (AR1)
-    theta_t = 0.05 # Reversion speed
-    sigma_t = 0.2  # Volatility
-    temp_wander = (1 - theta_t) * temp_wander + random.gauss(0, sigma_t)
+    # Weather perturbations to break the perfect sine wave:
+    # 1. Cloud cover: randomly dims the heating (drops temp by 1-3C)
+    cloud_cover = wanderer.get("cloud_cover", 0.02, 1.0)
+    # 2. Wind gusts: short-lived cooling events
+    wind_gust = wanderer.get("wind_gust", 0.05, 0.5)
+    # 3. Slow day-to-day baseline drift (monsoon vs dry spell)
+    # Reduced sigma from 1.5 to 0.2 so it stays within realistic seasonal bounds
+    day_drift = wanderer.get("day_drift", 0.002, 0.2)
+    # 4. Random sharp perturbation (rain event, door opening, etc.)
+    rain_event = random.gauss(0, 0.3) if random.random() < 0.05 else 0.0
     
-    theta_rh = 0.05
-    sigma_rh = 0.8
-    rh_wander = (1 - theta_rh) * rh_wander + random.gauss(0, sigma_rh)
+    # True stochastic wandering (smooth AR1)
+    temp_wander = wanderer.get("ambient_t", 0.05, 0.5)
+    rh_wander = wanderer.get("ambient_rh", 0.05, 1.0)
     
-    temp_c = base_temp + temp_wander
+    temp_c = base_temp + cloud_cover + wind_gust + day_drift + rain_event + temp_wander
     rh_pct = max(0, min(100, base_rh + rh_wander))
     
     offset = compute_baseline_offset(temp_c)
@@ -113,7 +115,8 @@ def generate_reading() -> dict:
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": now.isoformat() + "Z",
-        "sensor_type": "ambient_weather",
+        "sensor_type": "ambient",
+        "schema_version": "1.0",
         "data": {
             "ambient_temp_c": round(temp_c, 2),
             "relative_humidity_pct": round(rh_pct, 1),
@@ -130,14 +133,86 @@ def generate_reading() -> dict:
 from omniview.edge.mqtt_client import OmniViewMQTTClient
 from omniview.edge.topics import build_topic
 
-def run_bot():
+def map_uci_row_to_payload(row: dict) -> dict:
+    wanderer.end_tick()
+    now = datetime.datetime.fromtimestamp(sim_clock.now())
+    
+    # Read from UCI columns
+    try:
+        temp_c = float(row.get("T_out", 25.0))
+    except ValueError:
+        temp_c = 25.0
+        
+    try:
+        rh_pct = float(row.get("RH_out", 50.0))
+    except ValueError:
+        rh_pct = 50.0
+        
+    try:
+        dew_point = float(row.get("Tdewpoint", 15.0))
+    except ValueError:
+        dew_point = 15.0
+
+    offset = compute_baseline_offset(temp_c)
+
+    # Compute heat index
+    a = 17.27
+    b = 237.7
+    e = (rh_pct / 100.0) * 6.105 * math.exp((a * temp_c) / (b + temp_c))
+    heat_index = round(temp_c + 0.33 * e - 0.70 * 0.5 - 4.0, 2)
+
+    rssi = int(-65 - (temp_c - 25.0) * 0.3 + wanderer.get("rssi", 0.1, 1.5))
+
+    payload = {
+        "device_id": DEVICE_ID,
+        "timestamp": now.isoformat() + "Z",
+        "sensor_type": "ambient",
+        "schema_version": "1.0",
+        "data": {
+            "ambient_temp_c": round(temp_c, 2),
+            "relative_humidity_pct": round(rh_pct, 1),
+            "dew_point_c": round(dew_point, 2),
+            "heat_index_c": heat_index,
+            "wireless_signal_strength_dbm": rssi,
+            "environmental_baseline_offset": round(offset, 2)
+        }
+    }
+    
+    _write_edge_state(payload)
+    return payload
+
+def read_csv_rows(csv_path: str):
+    """Generator that infinitely loops over the CSV."""
+    while True:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            # Ensure required columns are present
+            if not reader.fieldnames or not all(k in reader.fieldnames for k in ["T_out", "RH_out", "Tdewpoint"]):
+                print(f"Error: CSV {csv_path} does not contain T_out, RH_out, Tdewpoint.")
+                break
+                
+            for row in reader:
+                yield row
+
+def run_bot(csv_path=None):
     print(f"Starting Ambient Weather Bot... (Polling {POLL_INTERVAL}s interval)")
-    print("Mode: True Stochastic Live Generation (Ornstein-Uhlenbeck + Shared State)")
+    
+    csv_gen = None
+    if csv_path:
+        print(f"Mode: CSV Replay ({csv_path})")
+        csv_gen = read_csv_rows(csv_path)
+    else:
+        print("Mode: True Stochastic Live Generation (Ornstein-Uhlenbeck + Shared State)")
     
     topic = build_topic("pune-isbm", "floor", "ambient")
     with OmniViewMQTTClient() as client:
         while True:
-            payload = generate_reading()
+            if csv_gen:
+                row = next(csv_gen)
+                payload = map_uci_row_to_payload(row)
+            else:
+                payload = generate_reading()
+                
             validate_payload(payload)
             client.publish(topic, payload)
             
@@ -148,4 +223,7 @@ def run_bot():
             time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
-    run_bot()
+    parser = argparse.ArgumentParser(description="Ambient Weather Bot")
+    parser.add_argument("--csv", type=str, help="Path to UCI appliances energy CSV for replay")
+    args = parser.parse_args()
+    run_bot(csv_path=args.csv)

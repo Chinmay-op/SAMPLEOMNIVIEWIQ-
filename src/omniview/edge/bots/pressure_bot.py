@@ -63,9 +63,9 @@ def _write_edge_state(payload: dict):
         print(f"Failed to write edge state: {e}")
 
 # Live State
-current_pressure = 33.0
-pressure_min_memory = 33.0
-pressure_max_memory = 33.0
+current_pressure = 38.0
+pressure_min_memory = 38.0
+pressure_max_memory = 38.0
 compressor_active = False
 
 next_anomaly_time = 0.0
@@ -100,39 +100,33 @@ def generate_reading() -> dict:
 
     is_leak = get_poisson_anomaly()
 
-    # --- Live Pneumatic Physics ---
-    dt = POLL_INTERVAL
+    # --- Rigid State Machine Pneumatics ---
     
-    # Floors at zero: a pump can't pump backwards, a leak can't un-leak
-    # θ tuned for 5-day runs: 0.05 gives realistic fluctuation without drift
-    base_leak = max(0.0, 0.05 + wanderer.get("leak_base", 0.02, 0.005))
-    base_pump = max(0.0, 0.2 + wanderer.get("pump_base", 0.05, 0.02))
-    
-    # Motor torque loss due to voltage sag
-    if voltage_sag:
-        base_pump *= 0.6  # 40% loss of pumping power
-
-    if is_leak:
-        leak_rate = base_leak * (current_pressure / 40.0) # Non-linear leak  # bar/sec loss
-    elif machine_running:
-        leak_rate = (base_leak * 0.2) * (current_pressure / 40.0)  # normal consumption rate
+    # Check if edge state was externally manipulated for a leak (e.g. from plotting script)
+    external_leak = edge_state.get("pressure_leak", False)
+    if is_leak or external_leak:
+        target_pressure = 28.0
     else:
-        leak_rate = (base_leak * 0.02) * (current_pressure / 40.0) # slow micro-leak when off
-
-    # Compressor Control Logic (Hysteresis)
-    if current_pressure < 28.0:
-        compressor_active = True
-    elif current_pressure > 36.0:
-        compressor_active = False
-
-    if compressor_active:
-        pump_rate = base_pump * (1.0 - (current_pressure / 50.0)) # Non-linear compressor curve # bar/sec gain
-    else:
-        pump_rate = 0.0
+        target_pressure = 38.0
         
-    # Apply physics
-    net_change = (pump_rate - leak_rate) * dt
-    current_pressure += net_change
+    diff = target_pressure - current_pressure
+    
+    # Move towards target (linear pump up or leak down)
+    if diff > 0:
+        # Pumping up is fast (e.g. 5.0 bar per tick)
+        current_pressure += min(diff, 5.0) 
+        compressor_active = True
+    elif diff < 0:
+        # Leaking down is slower (e.g. 1.0 bar per tick)
+        current_pressure += max(diff, -1.0)
+        compressor_active = True
+    else:
+        compressor_active = False
+        
+    # Add tiny mechanical flutter when holding a line
+    if abs(current_pressure - target_pressure) < 0.1:
+        current_pressure = target_pressure + wanderer.get('press_noise', 0.02, 0.1)
+        
     current_pressure = max(0.0, min(current_pressure, 40.0)) # Clamp 0-40 bar
 
     # 5. Ugly Reality (Benign Glitch)
@@ -143,9 +137,9 @@ def generate_reading() -> dict:
         reported_pressure = 0.0
 
     # Trend calculation
-    if net_change > 1.0:
+    if diff > 1.0:
         trend = "RISING"
-    elif net_change < -1.0:
+    elif diff < -1.0:
         trend = "FALLING"
     else:
         trend = "STABLE"
@@ -174,7 +168,8 @@ def generate_reading() -> dict:
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
-        "sensor_type": "pressure_transmitter",
+        "sensor_type": "pressure",
+        "schema_version": "1.0",
         "data": {
             "process_data_variable_raw": pdv_raw,
             "pressure_bar": round(reported_pressure, 2),

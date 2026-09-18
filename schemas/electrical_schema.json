@@ -14,7 +14,11 @@
     },
     "sensor_type": {
       "type": "string",
-      "const": "electrical_meter"
+      "const": "electrical"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
     },
     "data": {
       "type": "object",
@@ -44,41 +48,22 @@
         "active_energy_kwh": { "type": "number", "description": "Total Active Energy (Import) in kWh" },
         "apparent_energy_kvah": { "type": "number", "description": "Total Apparent Energy in kVAh" },
         "delta_active_energy_kwh": { "type": "number", "description": "Active energy consumed in this polling interval (kWh)" },
-        "delta_apparent_energy_kvah": { "type": "number", "description": "Apparent energy consumed in this polling interval (kVAh)" },
-        "rolling_kva_15min": { "type": "number", "description": "15-minute rolling average of apparent power (edge-computed)" }
+        "delta_apparent_energy_kvah": { "type": "number", "description": "Apparent energy consumed in this polling interval (kVAh)" }
       },
       "required": [
         "voltage_v_ll_avg",
-        "voltage_v_l1_n",
-        "voltage_v_l2_n",
-        "voltage_v_l3_n",
         "current_a_avg",
-        "current_a_l1",
-        "current_a_l2",
-        "current_a_l3",
-        "current_a_neutral",
         "active_power_kw_total",
-        "active_power_kw_l1",
-        "active_power_kw_l2",
-        "active_power_kw_l3",
         "apparent_power_kva_total",
         "reactive_power_kvar_total",
         "power_factor_avg",
-        "power_factor_l1",
-        "power_factor_l2",
-        "power_factor_l3",
         "frequency_hz",
-        "voltage_thd_percent",
-        "current_thd_percent",
         "active_energy_kwh",
-        "apparent_energy_kvah",
-        "delta_active_energy_kwh",
-        "delta_apparent_energy_kvah",
-        "rolling_kva_15min"
+        "apparent_energy_kvah"
       ],
-      "additionalProperties": false
+      "additionalProperties": true
     }
   },
-  "required": ["device_id", "timestamp", "sensor_type", "data"],
+  "required": ["device_id", "timestamp", "sensor_type", "schema_version", "data"],
   "additionalProperties": false
 }

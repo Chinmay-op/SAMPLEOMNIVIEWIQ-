@@ -57,7 +57,7 @@ def _write_edge_state(payload: dict, is_anomaly: bool):
 
 
 # --- Live Stochastic PID State ---
-current_pv = 250.0  # Start near setpoint (skip cold-start transient)
+current_pv = 25.0  # Cold start from ambient
 integral_error = 0.0
 prev_error = 0.0
 mv_saturation_streak = 0
@@ -76,12 +76,14 @@ def get_poisson_anomaly():
         return True # Still in anomaly state
         
     if next_anomaly_time == 0.0:
-        next_anomaly_time = now + random.expovariate(1.0 / 21600.0) # Mean: 6 hours
+        # Initial anomaly occurs sometime in the next ~2 days, with a 12-hour minimum buffer
+        next_anomaly_time = now + 43200.0 + random.expovariate(1.0 / 86400.0) 
         return False
         
     if now >= next_anomaly_time:
-        next_anomaly_time = now + random.expovariate(1.0 / 21600.0)
-        anomaly_active_until = now + random.uniform(300, 1800) # Burnout lasts 5-30 mins (real heater failures don't self-repair in 60s)
+        # Anomalies are rare (mean 2 days) and spaced out (minimum 12 hours)
+        next_anomaly_time = now + 43200.0 + random.expovariate(1.0 / 86400.0)
+        anomaly_active_until = now + random.uniform(1800, 3600) # Burnout lasts 30-60 mins
         return True
         
     return False
@@ -118,23 +120,43 @@ def generate_reading() -> dict:
     # Heat gained from heater vs Heat lost to ambient
     # Calibrated: at 0.06°C/s and cooling_rate 0.0002, equilibrium at 100% duty = ~325°C.
     # PID will settle at 255°C setpoint with MV ≈ 78% duty (realistic).
-    heater_power = 0.06 # degrees per second at 100% duty
-    ambient_cooling_rate = 0.0002
+    # Newton's Law of Heating/Cooling:
+    # dT/dt = k * (T_target - T_current) + noise
+    # This naturally produces exponential curves that slow down as they approach target
     
-    # Add SSR noise to PID output (always — anomaly or not, the controller still runs)
+    # A large industrial barrel has massive thermal inertia. 
+    # Reduced constants so it takes ~30-40 minutes to heat up, and even longer to cool down.
+    heating_k = 0.0005  # Slow exponential heating
+    cooling_k = 0.00015 # Very slow exponential cooling to ambient
+    
+    # Add SSR noise to PID output
     mv = max(0.0, min(100.0, mv + wanderer.get('mv', 0.2, 1.0)))
     
     if is_anomaly:
-        # Heater burnout: PID still runs and MV climbs naturally toward saturation,
-        # but the heating element is physically dead — zero heat generated
-        heat_gained = 0.0
+        # Heater burnout: no heating, only slow cooling toward ambient
+        heat_pull = 0.0
     else:
-        heat_gained = (mv / 100.0) * heater_power * dt
-        
-    heat_lost = (current_pv - ambient_temp) * ambient_cooling_rate * dt
+        # The heater physically pulls the temperature toward the element's maximum theoretical temperature (~450°C)
+        # The PID controller's job is to throttle the MV so it settles at the 255°C setpoint.
+        max_heater_temp = 450.0
+        heat_pull = heating_k * (mv / 100.0) * (max_heater_temp - current_pv) * dt
+    
+    # Ambient always pulls temperature toward room temp (exponential cooling)
+    cool_pull = cooling_k * (current_pv - ambient_temp) * dt
+    
+    # Organic noise during steady state (simulates process disturbances)
+    thermal_noise = wanderer.get('thermal_noise', 0.05, 0.3)
     
     # Update actual temperature
-    current_pv += (heat_gained - heat_lost)
+    current_pv += (heat_pull - cool_pull + thermal_noise)
+    
+    # Re-calculate stall metrics for logic
+    pv_rate = (heat_pull - cool_pull) / dt if dt > 0 else 0.0  # °C/s
+    pv_stalled = pv_rate < 0.001  # effectively not heating
+    hb = (mv_saturation_streak >= 2) and (sp - current_pv > 3.0) and pv_stalled
+    ssr_fail = hb and (mv >= 99.0) and (random.random() < 0.3)
+    # Only flag loop_burnout if PV has genuinely stalled, not just during startup
+    loop_burnout = (abs(current_pv - sp) > 30.0) and pv_stalled
     
     # 15 min trend
     last_pv_15m.append(current_pv)
@@ -160,19 +182,20 @@ def generate_reading() -> dict:
     # Physics-based heater burnout detection:
     # MV saturated AND temperature stalled/falling (not climbing toward SP)
     mv_saturation_streak = mv_saturation_streak + 1 if mv >= 98.0 else 0
-    pv_rate = (heat_gained - heat_lost) / dt if dt > 0 else 0.0  # °C/s
+    pv_rate = (heat_pull - cool_pull) / dt if dt > 0 else 0.0  # °C/s
     pv_stalled = pv_rate < 0.001  # effectively not heating
     hb = (mv_saturation_streak >= 2) and (sp - current_pv > 3.0) and pv_stalled
     ssr_fail = hb and (mv >= 99.0) and (random.random() < 0.3)
     # Only flag loop_burnout if PV has genuinely stalled, not just during startup
     loop_burnout = (abs(current_pv - sp) > 30.0) and pv_stalled
 
-    reported_pv = current_pv + random.uniform(-0.5, 0.5)
+    reported_pv = current_pv + wanderer.get('thermal_noise_read', 0.05, 0.2)
 
     payload = {
         "device_id": DEVICE_ID,
         "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
-        "sensor_type": "thermal_probe",
+        "sensor_type": "thermal",
+        "schema_version": "1.0",
         "data": {
             "present_value_pv_c": round(reported_pv, 3),
             "set_point_sp_c": sp,

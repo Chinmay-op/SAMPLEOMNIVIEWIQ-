@@ -14,7 +14,11 @@
     },
     "sensor_type": {
       "type": "string",
-      "const": "gas_particle_sensor"
+      "const": "gas"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
     },
     "data": {
       "type": "object",
@@ -70,6 +74,7 @@
     "device_id",
     "timestamp",
     "sensor_type",
+    "schema_version",
     "data"
   ],
   "additionalProperties": false
