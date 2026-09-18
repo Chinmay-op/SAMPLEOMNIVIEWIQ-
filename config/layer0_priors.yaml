@@ -1,0 +1,147 @@
+# OmniView IQ — Equipment-Class Population Priors (Stage 0 · OI-63)
+# ===================================================================
+#
+# These are per-equipment-class baseline statistics (mean, std) for the
+# signals tracked by the Health Index. Stage A uses these as the
+# "population prior" — each machine's current feature slopes are
+# compared against these baselines to compute a deviation score.
+#
+# Source: manufacturer datasheets where available; team-estimated ranges
+# otherwise. Clearly labelled as PLACEHOLDER until real site calibration.
+#
+# IMPORTANT: These values are the starting point, not ground truth.
+# After 30+ days of real data, recalibrate from the site's own
+# population statistics. See Predictive_Maintenance_Build_Spec.md §3.
+
+equipment_classes:
+
+  # ── Injection Moulding Machine (ISBM-PET) ─────────────────────────
+  isbm_pet_moulding:
+    description: "ISBM-PET blow moulding machine — Pune ISBM pilot"
+    machines:
+      - "isbm-main-feed"
+    signals:
+      current_a_avg:
+        description: "Average phase current (A)"
+        mean: 205.0
+        std: 15.0
+        direction: "rising"  # rising current = concern
+      voltage_thd_percent:
+        description: "Voltage Total Harmonic Distortion (%)"
+        mean: 2.5
+        std: 0.8
+        direction: "rising"  # rising THD = power quality degradation
+      current_thd_percent:
+        description: "Current THD (%)"
+        mean: 11.0
+        std: 3.0
+        direction: "rising"  # rising = insulation stress
+      power_factor_avg:
+        description: "Average Power Factor"
+        mean: 0.95
+        std: 0.02
+        direction: "falling"  # falling PF = mechanical inefficiency
+      current_a_neutral:
+        description: "Neutral current (A)"
+        mean: 0.3
+        std: 0.2
+        direction: "rising"  # rising = imbalance / loose connections
+      phase_imbalance_percent:
+        description: "Phase current imbalance (%) — derived"
+        mean: 1.5
+        std: 1.0
+        direction: "rising"  # rising = winding / wiring issues
+      frequency_hz:
+        description: "Supply frequency (Hz)"
+        mean: 50.0
+        std: 0.05
+        direction: "both"  # deviation in either direction
+
+  # ── HP Air Compressor ──────────────────────────────────────────────
+  hp_compressor:
+    description: "High-pressure air compressor — 25-40 bar range"
+    machines:
+      - "hp-compressor"
+    signals:
+      current_a_avg:
+        description: "Average phase current (A)"
+        mean: 180.0
+        std: 20.0
+        direction: "rising"
+      power_factor_avg:
+        description: "Average Power Factor"
+        mean: 0.92
+        std: 0.03
+        direction: "falling"
+      voltage_thd_percent:
+        description: "Voltage THD (%)"
+        mean: 3.0
+        std: 1.0
+        direction: "rising"
+      current_thd_percent:
+        description: "Current THD (%)"
+        mean: 12.0
+        std: 4.0
+        direction: "rising"
+      phase_imbalance_percent:
+        description: "Phase current imbalance (%)"
+        mean: 2.0
+        std: 1.2
+        direction: "rising"
+
+  # ── Generic Industrial Motor (fallback) ────────────────────────────
+  generic_industrial_motor:
+    description: "Fallback priors for any unclassified industrial motor"
+    machines: []  # catch-all; resolved by machine_id → class lookup
+    signals:
+      current_a_avg:
+        mean: 150.0
+        std: 30.0
+        direction: "rising"
+      power_factor_avg:
+        mean: 0.90
+        std: 0.04
+        direction: "falling"
+      voltage_thd_percent:
+        mean: 3.0
+        std: 1.5
+        direction: "rising"
+      current_thd_percent:
+        mean: 10.0
+        std: 5.0
+        direction: "rising"
+      phase_imbalance_percent:
+        mean: 2.5
+        std: 1.5
+        direction: "rising"
+
+# ── Health Index Parameters ──────────────────────────────────────────
+health_index:
+  z_scale: 15.0           # HI = clip(100 - avg_z * z_scale, 0, 100)
+  slope_window_days: 7     # trailing window for rolling slope
+  min_warmup_days: 7       # don't compute HI until this many days exist
+  risk_tiers:
+    high: 40               # HI < 40 → high risk
+    medium: 70              # HI < 70 → medium risk
+    low: 100                # HI >= 70 → low risk
+
+# ── CUSUM Parameters (OI-66 retune target: ≤ 2/12 on drift fixture) ─
+cusum:
+  slack: 2.0               # Allow 2 std devs of natural drift (was 1.0 → over-flagged)
+  threshold: 8.0           # CUSUM accumulator threshold (was 5.0 → over-flagged)
+  reset_on_alert: true     # Reset accumulator after firing
+
+# ── Maintenance Event Logging (Stage 0 prerequisite for Stage B) ─────
+maintenance_log:
+  storage: "jsonl"         # "jsonl" (file) or "tsdb" (table) — start with file
+  path: "data/maintenance_events.jsonl"
+  required_fields:
+    - "machine_id"
+    - "event_date"
+    - "event_type"        # repair | replace | inspection_only
+    - "triggered_by"      # system_alert | manual_observation
+  optional_fields:
+    - "notes"
+    - "component"         # bearing | motor | winding | compressor
+    - "cost_inr"
+    - "downtime_hours"
