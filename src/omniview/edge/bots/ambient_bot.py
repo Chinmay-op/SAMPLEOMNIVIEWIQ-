@@ -5,7 +5,8 @@ import datetime
 import math
 from pathlib import Path
 import sys
-
+import argparse
+import csv
 # Ensure omniview is importable
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
@@ -132,14 +133,86 @@ def generate_reading() -> dict:
 from omniview.edge.mqtt_client import OmniViewMQTTClient
 from omniview.edge.topics import build_topic
 
-def run_bot():
+def map_uci_row_to_payload(row: dict) -> dict:
+    wanderer.end_tick()
+    now = datetime.datetime.fromtimestamp(sim_clock.now())
+    
+    # Read from UCI columns
+    try:
+        temp_c = float(row.get("T_out", 25.0))
+    except ValueError:
+        temp_c = 25.0
+        
+    try:
+        rh_pct = float(row.get("RH_out", 50.0))
+    except ValueError:
+        rh_pct = 50.0
+        
+    try:
+        dew_point = float(row.get("Tdewpoint", 15.0))
+    except ValueError:
+        dew_point = 15.0
+
+    offset = compute_baseline_offset(temp_c)
+
+    # Compute heat index
+    a = 17.27
+    b = 237.7
+    e = (rh_pct / 100.0) * 6.105 * math.exp((a * temp_c) / (b + temp_c))
+    heat_index = round(temp_c + 0.33 * e - 0.70 * 0.5 - 4.0, 2)
+
+    rssi = int(-65 - (temp_c - 25.0) * 0.3 + wanderer.get("rssi", 0.1, 1.5))
+
+    payload = {
+        "device_id": DEVICE_ID,
+        "timestamp": now.isoformat() + "Z",
+        "sensor_type": "ambient",
+        "schema_version": "1.0",
+        "data": {
+            "ambient_temp_c": round(temp_c, 2),
+            "relative_humidity_pct": round(rh_pct, 1),
+            "dew_point_c": round(dew_point, 2),
+            "heat_index_c": heat_index,
+            "wireless_signal_strength_dbm": rssi,
+            "environmental_baseline_offset": round(offset, 2)
+        }
+    }
+    
+    _write_edge_state(payload)
+    return payload
+
+def read_csv_rows(csv_path: str):
+    """Generator that infinitely loops over the CSV."""
+    while True:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            # Ensure required columns are present
+            if not reader.fieldnames or not all(k in reader.fieldnames for k in ["T_out", "RH_out", "Tdewpoint"]):
+                print(f"Error: CSV {csv_path} does not contain T_out, RH_out, Tdewpoint.")
+                break
+                
+            for row in reader:
+                yield row
+
+def run_bot(csv_path=None):
     print(f"Starting Ambient Weather Bot... (Polling {POLL_INTERVAL}s interval)")
-    print("Mode: True Stochastic Live Generation (Ornstein-Uhlenbeck + Shared State)")
+    
+    csv_gen = None
+    if csv_path:
+        print(f"Mode: CSV Replay ({csv_path})")
+        csv_gen = read_csv_rows(csv_path)
+    else:
+        print("Mode: True Stochastic Live Generation (Ornstein-Uhlenbeck + Shared State)")
     
     topic = build_topic("pune-isbm", "floor", "ambient")
     with OmniViewMQTTClient() as client:
         while True:
-            payload = generate_reading()
+            if csv_gen:
+                row = next(csv_gen)
+                payload = map_uci_row_to_payload(row)
+            else:
+                payload = generate_reading()
+                
             validate_payload(payload)
             client.publish(topic, payload)
             
@@ -150,4 +223,7 @@ def run_bot():
             time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
-    run_bot()
+    parser = argparse.ArgumentParser(description="Ambient Weather Bot")
+    parser.add_argument("--csv", type=str, help="Path to UCI appliances energy CSV for replay")
+    args = parser.parse_args()
+    run_bot(csv_path=args.csv)

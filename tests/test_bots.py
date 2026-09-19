@@ -21,6 +21,7 @@ from omniview.edge.bots import (
     generate_stroke,
     generate_ambient
 )
+from omniview.edge.bots.ambient_bot import map_uci_row_to_payload
 
 SCHEMA_DIR = Path(__file__).resolve().parents[1] / "schemas"
 
@@ -92,6 +93,23 @@ def test_ambient_bot():
     print("  ✅ ambient_bot OK")
 
 
+def test_ambient_bot_csv_mapping():
+    fake_row = {
+        "T_out": "22.5",
+        "RH_out": "45.0",
+        "Tdewpoint": "10.0"
+    }
+    payload = map_uci_row_to_payload(fake_row)
+    jsonschema.validate(instance=payload, schema=SCHEMAS["ambient"])
+    
+    assert payload["data"]["ambient_temp_c"] == 22.5
+    assert payload["data"]["relative_humidity_pct"] == 45.0
+    assert payload["data"]["dew_point_c"] == 10.0
+    assert "heat_index_c" in payload["data"]
+    assert "environmental_baseline_offset" in payload["data"]
+    print("  ✅ ambient_bot CSV mapping OK")
+
+
 if __name__ == "__main__":
     print("Running strict schema-validated bot tests...")
     test_electrical_bot()
@@ -101,4 +119,5 @@ if __name__ == "__main__":
     test_gas_bot()
     test_stroke_bot()
     test_ambient_bot()
-    print("\n🎉 All 7 bots passed strict validation!")
+    test_ambient_bot_csv_mapping()
+    print("\n🎉 All tests passed!")
