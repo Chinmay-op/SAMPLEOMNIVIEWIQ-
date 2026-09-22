@@ -300,9 +300,11 @@ class TestGetIdleLoadPercent:
 
     @patch("omniview.dashboard.queries.query_by_time_range")
     def test_detects_idle_by_low_current(self, mock_query):
+        # current=3 is below DASHBOARD_IDLE_CURRENT_THRESHOLD_A (5.0 A)
+        # This is the dashboard gauge threshold, NOT Lead's OI-57 rule (0.65 A)
         rows = [
             _make_elec_row(current=200, device_id="pune-isbm-mfm384"),
-            _make_elec_row(current=5, device_id="pune-isbm-mfm384",
+            _make_elec_row(current=3, device_id="pune-isbm-mfm384",
                            time_offset_min=1),
         ]
         mock_query.return_value = rows

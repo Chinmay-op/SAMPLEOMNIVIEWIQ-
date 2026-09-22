@@ -76,12 +76,24 @@ DASHBOARD_REFRESH_S: int = int(os.getenv("DASHBOARD_REFRESH_S", "30"))
 MD_PENALTY_RATE_PER_KVA: float = float(
     os.getenv("MD_PENALTY_RATE_PER_KVA", "350.0")
 )
+# Dashboard "% idle" gauge threshold — distinct from Lead's OI-57
+# lazy-idle rule threshold (IDLE_CURRENT_THRESHOLD_A = 0.65 A in
+# rules/lazy_idle.py).  The gauge measures "motor electrically idle
+# for the Owner overview"; the rule measures "lazy-idle onset for
+# Layer 3 event detection".  Do NOT unify them.
+DASHBOARD_IDLE_CURRENT_THRESHOLD_A: float = float(
+    os.getenv("DASHBOARD_IDLE_CURRENT_THRESHOLD_A", "5.0")
+)
+# Legacy alias — kept for any code that still imports it.
+# New code should use DASHBOARD_IDLE_CURRENT_THRESHOLD_A for the gauge
+# or the rule's own constant for lazy-idle detection.
 IDLE_CURRENT_THRESHOLD_A: float = float(
     os.getenv("IDLE_CURRENT_THRESHOLD_A", "10.0")
 )
 IDLE_TEMP_THRESHOLD_C: float = float(
     os.getenv("IDLE_TEMP_THRESHOLD_C", "200.0")
 )
+
 
 # ── Alert Routing (OI-71) ───────────────────────────────────────────
 ALERT_ROUTING_ENABLED: bool = os.getenv("ALERT_ROUTING_ENABLED", "true").lower() in (

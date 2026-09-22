@@ -24,7 +24,7 @@ import pandas as pd
 
 from omniview.config import (
     CONTRACTED_DEMAND_KVA,
-    IDLE_CURRENT_THRESHOLD_A,
+    DASHBOARD_IDLE_CURRENT_THRESHOLD_A,
     IDLE_TEMP_THRESHOLD_C,
     MD_PENALTY_RATE_PER_KVA,
     SITE_ID,
@@ -301,7 +301,7 @@ def get_idle_load_percent(
         scenario = r.get("scenario_label", "") or ""
         if scenario == "lazy_idle":
             idle_readings += 1
-        elif current < IDLE_CURRENT_THRESHOLD_A:
+        elif current < DASHBOARD_IDLE_CURRENT_THRESHOLD_A:
             idle_readings += 1
 
     # Each reading is 15s apart
