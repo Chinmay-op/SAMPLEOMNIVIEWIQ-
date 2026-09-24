@@ -177,12 +177,21 @@ class GasOverheatDetector:
         now_epoch = ts.timestamp()
         data = sample.get("data", sample)  # accept flat or nested
 
-        # Extract sensor fields
-        gas_ppm = float(data.get("gas_concentration_ppm", 0.0))
-        particles = float(data.get("micro_particle_index", 0.0))
-        panel_temp = float(data.get("internal_panel_temp_c", 0.0))
-        rise_rate = float(data.get("rate_of_thermal_rise_c_per_min", 0.0))
-        aqi = int(data.get("air_quality_index", 0))
+        # Extract sensor fields — accept both wire.py adapted (short)
+        # names and raw DevB (long) names for backward compatibility.
+        gas_ppm = float(
+            data.get("gas_ppm", data.get("gas_concentration_ppm", 0.0))
+        )
+        particles = float(
+            data.get("particle_idx", data.get("micro_particle_index", 0.0))
+        )
+        panel_temp = float(
+            data.get("panel_temp_c", data.get("internal_panel_temp_c", 0.0))
+        )
+        rise_rate = float(
+            data.get("thermal_rise_rate", data.get("rate_of_thermal_rise_c_per_min", 0.0))
+        )
+        aqi = int(data.get("aqi", data.get("air_quality_index", 0)))
 
         # Initialise or refresh device state
         state = self._state.get(device_id)

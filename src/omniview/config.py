@@ -107,3 +107,40 @@ _EMAIL_MAP_RAW: str = os.getenv("ALERT_EMAIL_RECIPIENT_MAP", "")
 ALERT_EMAIL_RECIPIENT_MAP: dict[str, str] = (
     __import__("json").loads(_EMAIL_MAP_RAW) if _EMAIL_MAP_RAW else {}
 )
+
+# ── Detector Runner (detectors_live.py) ─────────────────────────────────
+DETECTOR_POLL_INTERVAL_S: int = int(os.getenv("DETECTOR_POLL_INTERVAL_S", "15"))
+DETECTOR_WINDOW_S: int = int(os.getenv("DETECTOR_WINDOW_S", "900"))  # 15-min lookback
+
+# ── Rule: F02 MD Risk (demand_window.py) ────────────────────────────────
+# CONTRACTED_DEMAND_KVA is defined above (line 51)
+MD_WINDOW_MINUTES: int = int(os.getenv("MD_WINDOW_MINUTES", "15"))
+MD_ALERT_MINUTE: int = int(os.getenv("MD_ALERT_MINUTE", "11"))
+
+# ── Rule: F04 Lazy-Idle (lazy_idle.py) ──────────────────────────────────
+# These are the RULE thresholds — distinct from DASHBOARD_IDLE_CURRENT_THRESHOLD_A
+# Rule uses physics-based 0.65 A; dashboard gauge uses 5.0 A for display.
+LAZY_IDLE_RULE_CURRENT_A: float = float(
+    os.getenv("LAZY_IDLE_RULE_CURRENT_A", "0.65")
+)
+LAZY_IDLE_RULE_TEMP_C: float = float(
+    os.getenv("LAZY_IDLE_RULE_TEMP_C", "25.0")
+)
+LAZY_IDLE_DURATION_MIN: int = int(os.getenv("LAZY_IDLE_DURATION_MIN", "15"))
+
+# ── Rule: F05 Pressure Leak (pressure_leak.py) ─────────────────────────
+# PLACEHOLDER — pending OI-43 site data from WIKA pressure map
+PRESSURE_DECAY_THRESHOLD_BAR_PER_MIN: float = float(
+    os.getenv("PRESSURE_DECAY_THRESHOLD_BAR_PER_MIN", "0.15")
+)
+PRESSURE_SLOPE_WINDOW_S: int = int(os.getenv("PRESSURE_SLOPE_WINDOW_S", "300"))
+PRESSURE_MIN_LOADED_SAMPLES: int = int(
+    os.getenv("PRESSURE_MIN_LOADED_SAMPLES", "5")
+)
+
+# ── Rule: F06 Vibration Zone (vibration_zone.py) ───────────────────────
+# ISO 10816-3 Class II boundaries (mm/s RMS velocity)
+# PLACEHOLDER — reconcile against site machine nameplate (Phase 0)
+VIB_ZONE_B_BOUNDARY: float = float(os.getenv("VIB_ZONE_B_BOUNDARY", "2.8"))
+VIB_ZONE_C_BOUNDARY: float = float(os.getenv("VIB_ZONE_C_BOUNDARY", "7.1"))
+VIB_ZONE_D_BOUNDARY: float = float(os.getenv("VIB_ZONE_D_BOUNDARY", "18.0"))
