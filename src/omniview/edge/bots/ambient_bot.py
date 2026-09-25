@@ -11,10 +11,6 @@ import csv
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 from omniview.edge.bots.stochastic import wanderer, sim_clock
-import sys
-
-# Ensure omniview is importable
-sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 try:
     import jsonschema
@@ -56,6 +52,7 @@ def _read_edge_state() -> dict:
 def _write_edge_state(payload: dict):
     state = _read_edge_state()
     state["ambient_temp_c"] = payload["data"].get("ambient_temp_c", 25.0)
+    state["environmental_baseline_offset"] = payload["data"].get("environmental_baseline_offset", 1.0)
     
     state_file = Path(".edge_state.json")
     try:
@@ -67,7 +64,6 @@ def _write_edge_state(payload: dict):
 # Ambient states are now fully driven by smooth sine waves and wanderer
 
 def generate_reading() -> dict:
-    global temp_wander, rh_wander
     wanderer.end_tick()
     now = datetime.datetime.fromtimestamp(sim_clock.now())
     time_in_hours = now.hour + (now.minute / 60.0)
