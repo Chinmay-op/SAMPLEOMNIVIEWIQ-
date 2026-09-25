@@ -48,6 +48,9 @@ class DailyRow:
     # Gas / thermal features (§8 — closes Layer 3 audit Gap 3)
     gas_concentration_ppm: float | None = None
     internal_panel_temp_c: float | None = None
+    # Stroke features
+    total_strokes: int | None = None
+    mean_cycle_time_seconds: float | None = None
     # Metadata
     reading_count: int = 0
     gap_flagged: bool = False
@@ -67,6 +70,8 @@ class DailyRow:
             "z_rms_velocity_mm_sec": self.z_rms_velocity_mm_sec,
             "gas_concentration_ppm": self.gas_concentration_ppm,
             "internal_panel_temp_c": self.internal_panel_temp_c,
+            "total_strokes": self.total_strokes,
+            "mean_cycle_time_seconds": self.mean_cycle_time_seconds,
             "reading_count": self.reading_count,
             "gap_flagged": self.gap_flagged,
         }
@@ -92,6 +97,11 @@ _VIBRATION_FIELDS = {
 _GAS_FIELDS = {
     "gas_concentration_ppm",
     "internal_panel_temp_c",
+}
+
+_STROKE_FIELDS = {
+    "strokes_in_interval",
+    "last_cycle_time_seconds",
 }
 
 
@@ -183,6 +193,8 @@ def aggregate_daily(
             row = _aggregate_vibration(row, day_readings)
         elif sensor_type == "gas":
             row = _aggregate_gas(row, day_readings)
+        elif sensor_type == "stroke":
+            row = _aggregate_stroke(row, day_readings)
 
         rows.append(row)
 
@@ -261,6 +273,27 @@ def _aggregate_gas(row: DailyRow, readings: list[dict]) -> DailyRow:
     return row
 
 
+def _aggregate_stroke(row: DailyRow, readings: list[dict]) -> DailyRow:
+    """Compute daily aggregates for stroke signals."""
+    accums: dict[str, list[float]] = {f: [] for f in _STROKE_FIELDS}
+
+    for data in readings:
+        for fld in _STROKE_FIELDS:
+            val = data.get(fld)
+            if val is not None and isinstance(val, (int, float)):
+                accums[fld].append(float(val))
+
+    if accums["strokes_in_interval"]:
+        row.total_strokes = int(sum(accums["strokes_in_interval"]))
+    if accums["last_cycle_time_seconds"]:
+        # Filter out glitch readings (999.9) before averaging cycle time
+        valid_cycles = [v for v in accums["last_cycle_time_seconds"] if v < 900.0]
+        if valid_cycles:
+            row.mean_cycle_time_seconds = _mean(valid_cycles)
+
+    return row
+
+
 def compute_rolling_slopes(
     daily_rows: list[DailyRow],
     window_days: int = 7,
@@ -300,6 +333,8 @@ def compute_rolling_slopes(
             "z_rms_velocity_mm_sec",
             "gas_concentration_ppm",
             "internal_panel_temp_c",
+            "total_strokes",
+            "mean_cycle_time_seconds",
         ]
 
     results: list[dict[str, float | None]] = []

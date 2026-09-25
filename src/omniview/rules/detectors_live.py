@@ -66,6 +66,7 @@ from omniview.rules.gas_overheat import GasOverheatDetector, GasOverheatEvent
 from omniview.rules.gas_model import EnhancedGasOverheatDetector
 from omniview.rules.lazy_idle import LazyIdleDetector, LazyIdleEvent
 from omniview.rules.pressure_leak import PressureLeakDetector, PressureLeakEvent
+from omniview.rules.stroke_jam import StrokeJamDetector, StrokeAnomalyEvent
 from omniview.rules.vibration_zone import VibrationZoneDetector, VibrationZoneEvent
 
 logger = logging.getLogger(__name__)
@@ -130,6 +131,11 @@ def build_default_registry() -> list[DetectorEntry]:
             name="vibration_zone",
             detector=VibrationZoneDetector(),
             sensor_types=["vibration"],
+        ),
+        DetectorEntry(
+            name="stroke_jam",
+            detector=StrokeJamDetector(),
+            sensor_types=["stroke"],
         ),
     ]
 
