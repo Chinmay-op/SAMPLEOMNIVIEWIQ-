@@ -56,6 +56,17 @@ equipment_classes:
         mean: 50.0
         std: 0.05
         direction: "both"  # deviation in either direction
+      # Gas / thermal panel signals (§8 — wires gas into HI pipeline)
+      gas_concentration_ppm:
+        description: "Gas concentration (ppm) — outgassing from insulation"
+        mean: 1.2
+        std: 0.5
+        direction: "rising"  # rising gas = insulation degradation
+      internal_panel_temp_c:
+        description: "Internal panel temperature (°C)"
+        mean: 38.0
+        std: 5.0
+        direction: "rising"  # rising = thermal stress
 
   # ── HP Air Compressor ──────────────────────────────────────────────
   hp_compressor:
@@ -88,6 +99,16 @@ equipment_classes:
         mean: 2.0
         std: 1.2
         direction: "rising"
+      gas_concentration_ppm:
+        description: "Gas concentration (ppm) — outgassing from insulation"
+        mean: 1.5
+        std: 0.8
+        direction: "rising"
+      internal_panel_temp_c:
+        description: "Internal panel temperature (°C)"
+        mean: 40.0
+        std: 6.0
+        direction: "rising"
 
   # ── Generic Industrial Motor (fallback) ────────────────────────────
   generic_industrial_motor:
@@ -113,6 +134,16 @@ equipment_classes:
       phase_imbalance_percent:
         mean: 2.5
         std: 1.5
+        direction: "rising"
+      gas_concentration_ppm:
+        description: "Gas concentration (ppm)"
+        mean: 1.5
+        std: 1.0
+        direction: "rising"
+      internal_panel_temp_c:
+        description: "Internal panel temperature (°C)"
+        mean: 38.0
+        std: 6.0
         direction: "rising"
 
 # ── Health Index Parameters ──────────────────────────────────────────

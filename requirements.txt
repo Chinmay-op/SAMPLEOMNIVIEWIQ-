@@ -27,3 +27,7 @@ ntplib>=0.4.0
 
 # ── Validation ───────────────────────────────────────────────────────────
 jsonschema>=4.0,<5.0
+
+# ── ML / Statistical models (§7 gas outlier detection) ───────────────────
+scikit-learn>=1.3,<2.0
+joblib>=1.3

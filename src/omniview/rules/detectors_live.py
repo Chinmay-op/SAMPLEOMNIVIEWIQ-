@@ -63,6 +63,7 @@ from omniview.config import (
 )
 from omniview.rules.demand_window import DemandWindowDetector, MDRiskEvent
 from omniview.rules.gas_overheat import GasOverheatDetector, GasOverheatEvent
+from omniview.rules.gas_model import EnhancedGasOverheatDetector
 from omniview.rules.lazy_idle import LazyIdleDetector, LazyIdleEvent
 from omniview.rules.pressure_leak import PressureLeakDetector, PressureLeakEvent
 from omniview.rules.vibration_zone import VibrationZoneDetector, VibrationZoneEvent
@@ -100,8 +101,13 @@ def build_default_registry() -> list[DetectorEntry]:
     return [
         DetectorEntry(
             name="gas_overheat",
-            detector=GasOverheatDetector(),
-            sensor_types=["gas"],
+            detector=EnhancedGasOverheatDetector(),
+            # Gas + electrical: the enhanced detector caches electrical
+            # current_a_avg internally for I²R correlation (§3 root-cause).
+            # Unlike lazy_idle's broken cross-family pattern, this works
+            # because the detector caches data and returns None on
+            # electrical readings instead of requiring both in one sample.
+            sensor_types=["gas", "electrical"],
         ),
         DetectorEntry(
             name="demand_window",

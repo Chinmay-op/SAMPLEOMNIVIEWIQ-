@@ -45,6 +45,9 @@ class DailyRow:
     frequency_hz: float | None = None
     # Vibration features
     z_rms_velocity_mm_sec: float | None = None
+    # Gas / thermal features (§8 — closes Layer 3 audit Gap 3)
+    gas_concentration_ppm: float | None = None
+    internal_panel_temp_c: float | None = None
     # Metadata
     reading_count: int = 0
     gap_flagged: bool = False
@@ -62,6 +65,8 @@ class DailyRow:
             "phase_imbalance_percent": self.phase_imbalance_percent,
             "frequency_hz": self.frequency_hz,
             "z_rms_velocity_mm_sec": self.z_rms_velocity_mm_sec,
+            "gas_concentration_ppm": self.gas_concentration_ppm,
+            "internal_panel_temp_c": self.internal_panel_temp_c,
             "reading_count": self.reading_count,
             "gap_flagged": self.gap_flagged,
         }
@@ -82,6 +87,11 @@ _ELECTRICAL_FIELDS = {
 
 _VIBRATION_FIELDS = {
     "z_axis_rms_velocity_mm_sec",
+}
+
+_GAS_FIELDS = {
+    "gas_concentration_ppm",
+    "internal_panel_temp_c",
 }
 
 
@@ -171,6 +181,8 @@ def aggregate_daily(
             row = _aggregate_electrical(row, day_readings)
         elif sensor_type == "vibration":
             row = _aggregate_vibration(row, day_readings)
+        elif sensor_type == "gas":
+            row = _aggregate_gas(row, day_readings)
 
         rows.append(row)
 
@@ -226,6 +238,29 @@ def _aggregate_vibration(row: DailyRow, readings: list[dict]) -> DailyRow:
     return row
 
 
+def _aggregate_gas(row: DailyRow, readings: list[dict]) -> DailyRow:
+    """Compute daily means for gas / thermal panel signals.
+
+    §8 — wires gas into the existing PdM pipeline so the Health Index
+    sees gas_concentration_ppm and internal_panel_temp_c trends.
+    Same pattern as ``_aggregate_electrical`` / ``_aggregate_vibration``.
+    """
+    accums: dict[str, list[float]] = {f: [] for f in _GAS_FIELDS}
+
+    for data in readings:
+        for fld in _GAS_FIELDS:
+            val = data.get(fld)
+            if val is not None and isinstance(val, (int, float)):
+                accums[fld].append(float(val))
+
+    if accums["gas_concentration_ppm"]:
+        row.gas_concentration_ppm = _mean(accums["gas_concentration_ppm"])
+    if accums["internal_panel_temp_c"]:
+        row.internal_panel_temp_c = _mean(accums["internal_panel_temp_c"])
+
+    return row
+
+
 def compute_rolling_slopes(
     daily_rows: list[DailyRow],
     window_days: int = 7,
@@ -263,6 +298,8 @@ def compute_rolling_slopes(
             "phase_imbalance_percent",
             "frequency_hz",
             "z_rms_velocity_mm_sec",
+            "gas_concentration_ppm",
+            "internal_panel_temp_c",
         ]
 
     results: list[dict[str, float | None]] = []

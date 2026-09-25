@@ -132,6 +132,17 @@ class GasOverheatEvent:
     threshold_refs: dict[str, Any] = field(default_factory=dict)
     synthetic: bool = True
 
+    # §3–7 enrichment fields (populated by EnhancedGasOverheatDetector)
+    root_cause: str = ""
+    confidence_score: float = 0.0
+    gas_slope: float = 0.0
+    gas_acceleration: float = 0.0
+    temp_slope: float = 0.0
+    temp_acceleration: float = 0.0
+    ewma_z_gas: float = 0.0
+    ewma_z_temp: float = 0.0
+    outlier_score: float = 0.0
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-safe plain dict."""
         d = asdict(self)
