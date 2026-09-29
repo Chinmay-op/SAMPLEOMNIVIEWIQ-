@@ -807,6 +807,649 @@ class GasOutlierDetector:
 
 
 # ══════════════════════════════════════════════════════════════════════
+# §8  Energy Wastage Detection & Quantification
+# ══════════════════════════════════════════════════════════════════════
+
+# Default tariff rates (₹/kWh) — configurable per site
+DEFAULT_TARIFF_INR_PER_KWH: float = 8.5
+"""Average industrial tariff for Maharashtra HT-I category (2026).
+Override per-site via constructor parameter."""
+
+# Thermal efficiency thresholds
+THERMAL_EFFICIENCY_WARN_PCT: float = 70.0
+"""Flag thermal efficiency below this as wasteful."""
+THERMAL_EFFICIENCY_CRITICAL_PCT: float = 50.0
+"""Flag thermal efficiency below this as severe waste."""
+
+# Idle-burn detection
+IDLE_CURRENT_THRESHOLD_A: float = 2.0
+"""Current below this is 'idle' (no meaningful work happening)."""
+IDLE_TEMP_THRESHOLD_C: float = 40.0
+"""Panel temp above this while idle = idle-burn waste."""
+
+
+@dataclass(frozen=True)
+class EnergyWastageEvent:
+    """Event emitted when energy wastage is detected on a panel.
+
+    Separate from ``GasOverheatEvent`` — energy waste is a cost problem,
+    not a safety problem.  These events feed the cost-savings dashboard.
+    """
+
+    device_id: str
+    timestamp: datetime
+    event_type: str = "energy_wastage"
+    severity: str = "WARNING"
+    waste_type: str = ""  # I2R_OVERLOAD | IDLE_BURN | THERMAL_INEFFICIENCY
+    energy_waste_kwh: float = 0.0
+    estimated_cost_inr: float = 0.0
+    thermal_efficiency_pct: float = 100.0
+    details: str = ""
+    synthetic: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        if isinstance(d.get("timestamp"), datetime):
+            d["timestamp"] = d["timestamp"].isoformat()
+        return d
+
+
+class EnergyWastageAnalyzer:
+    """Detects and quantifies energy wastage from panel sensor data.
+
+    Three detection modes:
+
+    1. **I²R Overload Loss** — When ``ELECTRICAL_OVERLOAD`` root cause
+       fires, estimates the resistive power loss from the cross-family
+       cached current vs panel temperature relationship::
+
+           R_est = ΔT / (I² × thermal_coefficient)
+           P_loss = I² × R_est
+           E_wasted = P_loss × duration_hours
+
+    2. **Thermal Efficiency Index** — Ratio of expected temperature
+       (from current-proportional heating model) to actual temperature.
+       A ratio below ``THERMAL_EFFICIENCY_WARN_PCT`` means the panel
+       is hotter than the load justifies — wasted energy via poor
+       ventilation, degraded connections, or insulation faults.
+
+    3. **Idle-Burn Detection** — Equipment drawing negligible current
+       but panel temperature remains elevated (residual heating from
+       stuck heaters, parasitic loads, or cooling system failure).
+
+    Parameters
+    ----------
+    tariff_inr_per_kwh : float
+        Site electricity tariff in ₹/kWh (default: 8.5).
+    panel_thermal_resistance : float
+        Estimated panel thermal resistance in °C/W (default: 0.015).
+        Used for I²R loss estimation.  Varies by panel construction;
+        calibrate against site data during commissioning.
+    """
+
+    def __init__(
+        self,
+        tariff_inr_per_kwh: float = DEFAULT_TARIFF_INR_PER_KWH,
+        panel_thermal_resistance: float = 0.015,
+    ) -> None:
+        self._tariff = tariff_inr_per_kwh
+        self._thermal_r = panel_thermal_resistance
+        # device_id → cumulative waste tracking
+        self._cumulative_kwh: dict[str, float] = {}
+        self._cumulative_cost: dict[str, float] = {}
+        # device_id → last evaluation timestamp (epoch)
+        self._last_eval: dict[str, float] = {}
+
+    def analyze(
+        self,
+        device_id: str,
+        panel_temp: float,
+        ambient_temp: float | None,
+        current_a: float | None,
+        now_epoch: float,
+        root_cause: str = "",
+    ) -> dict[str, float | bool]:
+        """Analyze energy wastage for a single reading.
+
+        Returns a dict with enrichment fields for the event:
+        - ``energy_waste_kwh``: estimated energy waste since last eval
+        - ``estimated_cost_inr``: ₹ cost of that waste
+        - ``thermal_efficiency_pct``: 0–100 efficiency index
+        - ``idle_burn_detected``: True if idle-burn pattern found
+        - ``baseline_deviation_cost_inr``: ₹ cost from EWMA baseline drift
+
+        Parameters
+        ----------
+        device_id : str
+            Device producing this reading.
+        panel_temp : float
+            Internal panel temperature (°C).
+        ambient_temp : float or None
+            Ambient temperature from cross-family cache.
+        current_a : float or None
+            Current from cross-family cache (amps).
+        now_epoch : float
+            Current timestamp as epoch seconds.
+        root_cause : str
+            Root-cause classification from §3.
+        """
+        result: dict[str, float | bool] = {
+            "energy_waste_kwh": 0.0,
+            "estimated_cost_inr": 0.0,
+            "thermal_efficiency_pct": 100.0,
+            "idle_burn_detected": False,
+            "baseline_deviation_cost_inr": 0.0,
+        }
+
+        # Calculate time delta since last evaluation
+        last = self._last_eval.get(device_id, now_epoch)
+        dt_hours = max(0.0, (now_epoch - last) / 3600.0)
+        self._last_eval[device_id] = now_epoch
+
+        # Clamp dt to avoid absurd waste values on first call or stale data
+        dt_hours = min(dt_hours, 1.0)
+
+        amb = ambient_temp if ambient_temp is not None else 25.0
+        delta_t = max(0.0, panel_temp - amb)
+
+        # ── Mode 1: I²R Overload Loss ────────────────────────────────
+        if (
+            current_a is not None
+            and current_a > 0
+            and root_cause == "ELECTRICAL_OVERLOAD"
+        ):
+            # Estimate resistive loss: P = I² × R_est
+            # R_est derived from thermal model: R = delta_T / (I² × k)
+            # where k is thermal resistance coefficient
+            i_sq = current_a * current_a
+            p_loss_w = i_sq * self._thermal_r * delta_t
+            p_loss_kw = p_loss_w / 1000.0
+            waste_kwh = p_loss_kw * dt_hours
+            result["energy_waste_kwh"] = round(waste_kwh, 4)
+            result["estimated_cost_inr"] = round(
+                waste_kwh * self._tariff, 2
+            )
+
+        # ── Mode 2: Thermal Efficiency Index ─────────────────────────
+        if current_a is not None and current_a > IDLE_CURRENT_THRESHOLD_A:
+            # Expected temperature rise proportional to I²
+            i_sq = current_a * current_a
+            expected_delta = i_sq * self._thermal_r * 100.0  # scale factor
+            expected_delta = max(expected_delta, 1.0)
+
+            if delta_t > 0:
+                # Efficiency = expected / actual (clamped 0–100)
+                efficiency = min(100.0, (expected_delta / delta_t) * 100.0)
+            else:
+                efficiency = 100.0
+
+            result["thermal_efficiency_pct"] = round(efficiency, 1)
+
+            # If efficiency is poor, the excess heat is wasted energy
+            if efficiency < THERMAL_EFFICIENCY_WARN_PCT:
+                excess_factor = 1.0 - (efficiency / 100.0)
+                # Rough: excess temperature × thermal mass ≈ waste power
+                waste_kw = delta_t * excess_factor * 0.01  # empirical scale
+                excess_kwh = waste_kw * dt_hours
+                result["baseline_deviation_cost_inr"] = round(
+                    excess_kwh * self._tariff, 2
+                )
+                result["energy_waste_kwh"] = round(
+                    result["energy_waste_kwh"] + excess_kwh, 4
+                )
+                result["estimated_cost_inr"] = round(
+                    result["estimated_cost_inr"] + excess_kwh * self._tariff, 2
+                )
+
+        # ── Mode 3: Idle-Burn Detection ──────────────────────────────
+        if (
+            current_a is not None
+            and current_a <= IDLE_CURRENT_THRESHOLD_A
+            and panel_temp >= IDLE_TEMP_THRESHOLD_C
+        ):
+            result["idle_burn_detected"] = True
+            # Waste = thermal mass maintenance power × time
+            # Rough estimate: 0.5–2 kW depending on panel size
+            idle_waste_kw = delta_t * 0.02  # empirical: ~0.02 kW per °C
+            idle_kwh = idle_waste_kw * dt_hours
+            result["energy_waste_kwh"] = round(
+                result["energy_waste_kwh"] + idle_kwh, 4
+            )
+            result["estimated_cost_inr"] = round(
+                result["estimated_cost_inr"] + idle_kwh * self._tariff, 2
+            )
+
+        # ── Accumulate cumulative tracking ───────────────────────────
+        if device_id not in self._cumulative_kwh:
+            self._cumulative_kwh[device_id] = 0.0
+            self._cumulative_cost[device_id] = 0.0
+
+        self._cumulative_kwh[device_id] += result["energy_waste_kwh"]
+        self._cumulative_cost[device_id] += result["estimated_cost_inr"]
+
+        return result
+
+    def get_cumulative(
+        self, device_id: str
+    ) -> tuple[float, float]:
+        """Return (cumulative_kwh, cumulative_cost_inr) for a device."""
+        return (
+            self._cumulative_kwh.get(device_id, 0.0),
+            self._cumulative_cost.get(device_id, 0.0),
+        )
+
+    def reset(self, device_id: str | None = None) -> None:
+        if device_id:
+            self._cumulative_kwh.pop(device_id, None)
+            self._cumulative_cost.pop(device_id, None)
+            self._last_eval.pop(device_id, None)
+        else:
+            self._cumulative_kwh.clear()
+            self._cumulative_cost.clear()
+            self._last_eval.clear()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# §9  Equipment Health & Predictive Maintenance
+# ══════════════════════════════════════════════════════════════════════
+
+# Health Index thresholds → maintenance urgency mapping
+HI_URGENCY_THRESHOLDS: list[tuple[float, str]] = [
+    (80.0, "ROUTINE"),      # HI ≥ 80: normal scheduled maintenance
+    (60.0, "SCHEDULED"),    # 60 ≤ HI < 80: plan maintenance within 2 weeks
+    (40.0, "URGENT"),       # 40 ≤ HI < 60: maintenance within 3 days
+    (0.0, "EMERGENCY"),     # HI < 40: immediate maintenance required
+]
+
+# Severity-based HI decay weights
+SEVERITY_DECAY_WEIGHTS: dict[str, float] = {
+    "CRITICAL": 0.05,   # 5% HI decay per CRITICAL anomaly
+    "WARNING": 0.02,    # 2% HI decay per WARNING
+    "INFO": 0.005,      # 0.5% decay per INFO/WATCH
+}
+
+# HI threshold below which RUL prediction is meaningful
+HI_FAILURE_THRESHOLD: float = 20.0
+"""Equipment is considered 'failed' at this HI level."""
+
+
+@dataclass
+class DeviceHealthState:
+    """Mutable per-device health tracking state.
+
+    Not frozen — the health index degrades over time as anomalies
+    accumulate.  This is the core of the predictive maintenance model.
+    """
+
+    health_index: float = 100.0
+    cumulative_anomaly_hours: float = 0.0
+    anomaly_count: int = 0
+    first_anomaly_epoch: float = 0.0
+    last_anomaly_epoch: float = 0.0
+    # Rolling HI history for degradation rate computation
+    hi_history: list[tuple[float, float]] = field(
+        default_factory=list
+    )  # [(epoch, hi), ...]
+    last_maintenance_reset: float = 0.0
+
+
+class EquipmentHealthTracker:
+    """Per-device equipment health tracking and RUL estimation.
+
+    The Health Index (HI) model:
+
+    1. **Starts at 100** for a new/reset device.
+    2. **Decays on each anomaly**, weighted by severity::
+
+           HI(t) = HI(t-1) × (1 - decay_weight)
+
+       CRITICAL events decay faster than WARNING, which decays faster
+       than INFO.
+
+    3. **Cumulative damage accumulation** — tracks total anomaly-hours
+       (time × severity weighting) to model fatigue-like degradation.
+
+    4. **RUL estimation** via linear extrapolation of HI decay slope::
+
+           degradation_rate = ΔHI / Δt  (from HI history)
+           RUL = (HI - HI_failure_threshold) / |degradation_rate|
+
+    5. **Maintenance urgency mapping** — HI thresholds map directly to
+       urgency tiers matching maintenance planning cycles.
+
+    Why not a neural network or more complex ML?
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    - We have **no failure data yet** (the system is new, there haven't
+      been real failures to train against).
+    - The exponential decay model is **physics-informed**: insulation
+      degradation, bearing wear, and connector resistance all follow
+      cumulative-damage models.
+    - The model is **interpretable**: a plant manager can understand
+      "HI dropped 5 points because of 3 overload events".
+    - When real failure data accumulates (target: 6 months), we can
+      fit a survival model (Weibull / Cox) on top of this HI curve.
+
+    Parameters
+    ----------
+    hi_history_max : int
+        Maximum HI history entries to retain for RUL slope calculation.
+    """
+
+    def __init__(self, hi_history_max: int = 100) -> None:
+        self._devices: dict[str, DeviceHealthState] = {}
+        self._hi_history_max = hi_history_max
+
+    def update(
+        self,
+        device_id: str,
+        severity: str,
+        now_epoch: float,
+        confidence_score: float = 0.0,
+        outlier_score: float = 0.0,
+    ) -> dict[str, float | str]:
+        """Update device health state after an anomaly event.
+
+        Parameters
+        ----------
+        device_id : str
+            Device that experienced the anomaly.
+        severity : str
+            Event severity: CRITICAL, WARNING, INFO.
+        now_epoch : float
+            Current timestamp as epoch seconds.
+        confidence_score : float
+            0–100 confidence score from §6 (modulates decay).
+        outlier_score : float
+            IsolationForest anomaly score from §7 (modulates decay).
+
+        Returns
+        -------
+        dict with:
+            equipment_health_index : float (0–100)
+            remaining_useful_life_hours : float (-1 if insufficient data)
+            maintenance_urgency : str
+            cumulative_anomaly_hours : float
+            degradation_rate : float (HI points per hour)
+        """
+        state = self._devices.get(device_id)
+        if state is None:
+            state = DeviceHealthState()
+            self._devices[device_id] = state
+
+        # Calculate time since last anomaly
+        if state.last_anomaly_epoch > 0:
+            dt_hours = (now_epoch - state.last_anomaly_epoch) / 3600.0
+        else:
+            dt_hours = 0.0
+            state.first_anomaly_epoch = now_epoch
+
+        state.last_anomaly_epoch = now_epoch
+        state.anomaly_count += 1
+
+        # ── Decay HI based on severity ───────────────────────────────
+        base_decay = SEVERITY_DECAY_WEIGHTS.get(severity, 0.005)
+
+        # Modulate decay by confidence and outlier scores
+        # Higher confidence = more certain the anomaly is real = more decay
+        confidence_factor = 0.5 + (confidence_score / 200.0)  # 0.5–1.0
+        outlier_factor = 1.0 + min(outlier_score, 1.0)  # 1.0–2.0
+
+        effective_decay = base_decay * confidence_factor * outlier_factor
+
+        prev_hi = state.health_index
+        state.health_index = max(
+            0.0, prev_hi * (1.0 - effective_decay)
+        )
+
+        # ── Accumulate anomaly-hours ─────────────────────────────────
+        # Weight by severity: CRITICAL counts 3x, WARNING 2x, INFO 1x
+        severity_weight = {"CRITICAL": 3.0, "WARNING": 2.0}.get(severity, 1.0)
+        state.cumulative_anomaly_hours += max(dt_hours, 0.1) * severity_weight
+
+        # ── Record HI history for RUL slope ──────────────────────────
+        state.hi_history.append((now_epoch, state.health_index))
+        if len(state.hi_history) > self._hi_history_max:
+            state.hi_history = state.hi_history[-self._hi_history_max:]
+
+        # ── Compute degradation rate (HI points per hour) ────────────
+        degradation_rate = self._compute_degradation_rate(state)
+
+        # ── Estimate RUL ─────────────────────────────────────────────
+        rul_hours = -1.0
+        if (
+            degradation_rate < -1e-6
+            and state.health_index > HI_FAILURE_THRESHOLD
+            and len(state.hi_history) >= 3
+        ):
+            # Linear extrapolation: how many hours until HI hits failure
+            hi_remaining = state.health_index - HI_FAILURE_THRESHOLD
+            rul_hours = hi_remaining / abs(degradation_rate)
+            # Cap at 8760 hours (1 year) to avoid absurd predictions
+            rul_hours = min(rul_hours, 8760.0)
+
+        # ── Map HI to maintenance urgency ────────────────────────────
+        urgency = "ROUTINE"
+        for threshold, label in HI_URGENCY_THRESHOLDS:
+            if state.health_index >= threshold:
+                urgency = label
+                break
+
+        return {
+            "equipment_health_index": round(state.health_index, 1),
+            "remaining_useful_life_hours": round(rul_hours, 1),
+            "maintenance_urgency": urgency,
+            "cumulative_anomaly_hours": round(
+                state.cumulative_anomaly_hours, 2
+            ),
+            "degradation_rate": round(degradation_rate, 6),
+        }
+
+    def get_health(self, device_id: str) -> DeviceHealthState | None:
+        """Get the current health state for a device."""
+        return self._devices.get(device_id)
+
+    def reset_after_maintenance(
+        self, device_id: str, now_epoch: float
+    ) -> None:
+        """Reset device health after maintenance is performed.
+
+        Doesn't reset to 100 — maintenance restores health partially
+        based on the type of work done.  Default: restore to 90.
+        """
+        state = self._devices.get(device_id)
+        if state is None:
+            return
+        state.health_index = 90.0
+        state.last_maintenance_reset = now_epoch
+        state.hi_history.append((now_epoch, 90.0))
+        logger.info(
+            "Device %s health reset to 90.0 after maintenance", device_id
+        )
+
+    def reset(self, device_id: str | None = None) -> None:
+        if device_id:
+            self._devices.pop(device_id, None)
+        else:
+            self._devices.clear()
+
+    @staticmethod
+    def _compute_degradation_rate(
+        state: DeviceHealthState,
+    ) -> float:
+        """Compute HI degradation rate (points per hour) via linear fit.
+
+        Uses the last N entries from hi_history.  Returns negative values
+        (HI is declining), 0.0 if insufficient data.
+        """
+        history = state.hi_history
+        if len(history) < 3:
+            return 0.0
+
+        # Use last 20 entries for slope calculation
+        recent = history[-20:]
+        epochs = [h[0] for h in recent]
+        his = [h[1] for h in recent]
+
+        # Convert to hours relative to first entry
+        t0 = epochs[0]
+        t_hours = [(e - t0) / 3600.0 for e in epochs]
+
+        slope = _polyfit_slope(t_hours, his)
+        return slope if slope is not None else 0.0
+
+
+# ══════════════════════════════════════════════════════════════════════
+# §10  Cost Impact Estimator
+# ══════════════════════════════════════════════════════════════════════
+
+# Cost reference table (₹) — empirical estimates for Indian manufacturing
+COST_REFERENCE_INR: dict[str, dict[str, float]] = {
+    "CRITICAL": {
+        "downtime_per_hour": 50_000.0,   # ₹50K/hr lost production
+        "equipment_damage_risk": 200_000.0,  # panel replacement
+        "safety_incident_cost": 500_000.0,   # safety investigation
+    },
+    "WARNING": {
+        "downtime_per_hour": 25_000.0,
+        "equipment_damage_risk": 50_000.0,
+        "safety_incident_cost": 0.0,
+    },
+    "INFO": {
+        "downtime_per_hour": 10_000.0,
+        "equipment_damage_risk": 15_000.0,
+        "safety_incident_cost": 0.0,
+    },
+}
+
+# Average maintenance costs by urgency
+MAINTENANCE_COST_INR: dict[str, float] = {
+    "ROUTINE": 5_000.0,      # ₹5K planned maintenance
+    "SCHEDULED": 15_000.0,    # ₹15K scheduled repair
+    "URGENT": 50_000.0,       # ₹50K urgent repair (parts expediting)
+    "EMERGENCY": 150_000.0,   # ₹1.5L emergency breakdown
+}
+
+# Early-detection savings multiplier
+# Catching a CRITICAL event before it becomes a failure saves 3–5x
+EARLY_DETECTION_MULTIPLIER: dict[str, float] = {
+    "CRITICAL": 5.0,
+    "WARNING": 3.0,
+    "INFO": 1.5,
+}
+
+
+class CostImpactEstimator:
+    """Maps every detected event to a ₹ cost estimate.
+
+    Three cost dimensions:
+
+    1. **Estimated cost impact** — What this event would cost if left
+       unaddressed (downtime + equipment damage + safety).
+
+    2. **Savings from detection** — How much money was saved by catching
+       this event early (avoided-downtime × early-detection multiplier).
+
+    3. **Downtime risk** — Estimated hours of downtime if the condition
+       progresses to failure.
+
+    All estimates are conservative (designed to under-promise, not
+    over-promise savings).  The cost reference table should be
+    calibrated against actual site financials during deployment.
+
+    Why simple lookup tables instead of regression models?
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    - No historical cost data yet (greenfield deployment).
+    - Lookup tables are **auditable**: finance can verify every ₹ number.
+    - When 6+ months of actual incident costs accumulate, fit a
+      regression model to replace these estimates.
+    """
+
+    def __init__(
+        self,
+        cost_reference: dict[str, dict[str, float]] | None = None,
+    ) -> None:
+        self._costs = cost_reference or COST_REFERENCE_INR
+
+    def estimate(
+        self,
+        severity: str,
+        tier: str,
+        root_cause: str,
+        health_index: float,
+        rul_hours: float,
+        maintenance_urgency: str,
+        energy_waste_cost_inr: float = 0.0,
+    ) -> dict[str, float]:
+        """Estimate cost impact of an event.
+
+        Parameters
+        ----------
+        severity : str
+            CRITICAL / WARNING / INFO.
+        tier : str
+            Detection tier (CRITICAL, WARNING_TEMP, etc.).
+        root_cause : str
+            Root-cause classification from §3.
+        health_index : float
+            Current equipment HI from §9.
+        rul_hours : float
+            Remaining useful life estimate (-1 if unknown).
+        maintenance_urgency : str
+            Urgency tier from §9.
+        energy_waste_cost_inr : float
+            Energy waste cost from §8 (additive).
+
+        Returns
+        -------
+        dict with:
+            estimated_cost_impact_inr : float
+            savings_from_detection_inr : float
+            downtime_risk_hours : float
+        """
+        ref = self._costs.get(severity, self._costs.get("INFO", {}))
+
+        # ── Downtime risk hours ──────────────────────────────────────
+        if rul_hours > 0:
+            # RUL gives us a time-to-failure estimate
+            downtime_risk = min(rul_hours, 48.0)
+        else:
+            # Estimate from severity
+            downtime_map = {"CRITICAL": 4.0, "WARNING": 8.0, "INFO": 24.0}
+            downtime_risk = downtime_map.get(severity, 24.0)
+
+        # ── Base cost impact ─────────────────────────────────────────
+        cost_impact = (
+            ref.get("downtime_per_hour", 0) * min(downtime_risk, 8.0)
+            + ref.get("equipment_damage_risk", 0)
+            + ref.get("safety_incident_cost", 0)
+            + energy_waste_cost_inr
+        )
+
+        # Scale by health index — lower HI = higher risk of actual loss
+        hi_factor = 1.0 + (1.0 - health_index / 100.0)  # 1.0–2.0
+        cost_impact *= hi_factor
+
+        # ── Savings from early detection ─────────────────────────────
+        multiplier = EARLY_DETECTION_MULTIPLIER.get(severity, 1.0)
+        maint_cost = MAINTENANCE_COST_INR.get(maintenance_urgency, 5000.0)
+
+        # Savings = (avoided breakdown cost - preventive maintenance cost)
+        # × early detection multiplier (how much worse it would be without
+        # early detection)
+        avoided_breakdown = MAINTENANCE_COST_INR.get("EMERGENCY", 150_000.0)
+        savings = max(0.0, (avoided_breakdown - maint_cost) * multiplier)
+
+        # If HI is still high, the savings are smaller (less risk avoided)
+        savings *= max(0.1, 1.0 - health_index / 100.0)
+
+        return {
+            "estimated_cost_impact_inr": round(cost_impact, 0),
+            "savings_from_detection_inr": round(savings, 0),
+            "downtime_risk_hours": round(downtime_risk, 1),
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Enhanced Detector — wraps GasOverheatDetector + all extensions
 # ══════════════════════════════════════════════════════════════════════
 
@@ -828,6 +1471,9 @@ class EnhancedGasOverheatDetector:
     - Derivative features (slope, acceleration)
     - Composite confidence score (0–100)
     - IsolationForest outlier scoring (if model available)
+    - §8 Energy wastage detection & quantification
+    - §9 Equipment health tracking & predictive maintenance (RUL)
+    - §10 Cost impact estimation (₹ savings from early detection)
 
     **CRITICAL fire-precursor rules are untouched.** This detector
     delegates to ``GasOverheatDetector`` for tier classification and
@@ -844,6 +1490,8 @@ class EnhancedGasOverheatDetector:
         Rolling window size for derivatives and correlation (default 15).
     outlier_model_path : str or Path, optional
         Path to the fitted IsolationForest model.
+    tariff_inr_per_kwh : float
+        Site electricity tariff in ₹/kWh for energy waste costing.
     """
 
     def __init__(
@@ -852,7 +1500,9 @@ class EnhancedGasOverheatDetector:
         ewma_alpha: float = 0.1,
         window_size: int = 15,
         outlier_model_path: str | Path | None = None,
+        tariff_inr_per_kwh: float = DEFAULT_TARIFF_INR_PER_KWH,
     ) -> None:
+        # §1–7: Original components
         self._base = GasOverheatDetector()
         self._health_gate = SensorHealthGate()
         self._cross_family = CrossFamilyCache()
@@ -860,6 +1510,13 @@ class EnhancedGasOverheatDetector:
         self._site_key = site_key
         self._ewma_alpha = ewma_alpha
         self._window_size = window_size
+
+        # §8–10: Cost-saving & predictive maintenance components
+        self._energy_analyzer = EnergyWastageAnalyzer(
+            tariff_inr_per_kwh=tariff_inr_per_kwh,
+        )
+        self._health_tracker = EquipmentHealthTracker()
+        self._cost_estimator = CostImpactEstimator()
 
         # Per-device tracking
         # device_id → {signal_name: EWMATracker}
@@ -1041,6 +1698,38 @@ class EnhancedGasOverheatDetector:
             "gas_acceleration": gas_accel or 0.0,
         })
 
+        # ── §8: Energy wastage analysis ────────────────────────────────
+        energy_data = self._energy_analyzer.analyze(
+            device_id=device_id,
+            panel_temp=panel_temp,
+            ambient_temp=cached_ambient,
+            current_a=cached_current,
+            now_epoch=now_epoch,
+            root_cause=root_cause,
+        )
+
+        # ── §9: Equipment health & predictive maintenance ────────────
+        health_data = self._health_tracker.update(
+            device_id=device_id,
+            severity=severity,
+            now_epoch=now_epoch,
+            confidence_score=confidence,
+            outlier_score=outlier_score,
+        )
+
+        # ── §10: Cost impact estimation ──────────────────────────────
+        cost_data = self._cost_estimator.estimate(
+            severity=severity,
+            tier=tier,
+            root_cause=root_cause,
+            health_index=health_data["equipment_health_index"],
+            rul_hours=health_data["remaining_useful_life_hours"],
+            maintenance_urgency=health_data["maintenance_urgency"],
+            energy_waste_cost_inr=float(
+                energy_data.get("estimated_cost_inr", 0.0)
+            ),
+        )
+
         # Build enriched event
         condition_duration = (
             base_event.condition_duration_s if base_event else 0.0
@@ -1076,13 +1765,56 @@ class EnhancedGasOverheatDetector:
             ewma_z_gas=round(ewma_z_gas, 3),
             ewma_z_temp=round(ewma_z_temp, 3),
             outlier_score=outlier_score,
+            # §8 Energy wastage enrichment
+            energy_waste_kwh=float(energy_data.get("energy_waste_kwh", 0.0)),
+            thermal_efficiency_pct=float(
+                energy_data.get("thermal_efficiency_pct", 100.0)
+            ),
+            idle_burn_detected=bool(
+                energy_data.get("idle_burn_detected", False)
+            ),
+            baseline_deviation_cost_inr=float(
+                energy_data.get("baseline_deviation_cost_inr", 0.0)
+            ),
+            # §9 Predictive maintenance enrichment
+            equipment_health_index=float(
+                health_data["equipment_health_index"]
+            ),
+            remaining_useful_life_hours=float(
+                health_data["remaining_useful_life_hours"]
+            ),
+            maintenance_urgency=str(
+                health_data["maintenance_urgency"]
+            ),
+            cumulative_anomaly_hours=float(
+                health_data["cumulative_anomaly_hours"]
+            ),
+            degradation_rate=float(
+                health_data["degradation_rate"]
+            ),
+            # §10 Cost impact enrichment
+            estimated_cost_impact_inr=float(
+                cost_data["estimated_cost_impact_inr"]
+            ),
+            savings_from_detection_inr=float(
+                cost_data["savings_from_detection_inr"]
+            ),
+            downtime_risk_hours=float(
+                cost_data["downtime_risk_hours"]
+            ),
         )
 
         logger.info(
             "Enhanced gas event: %s/%s on %s — root_cause=%s "
-            "confidence=%.1f outlier=%.3f",
+            "confidence=%.1f outlier=%.3f HI=%.1f RUL=%.1fh "
+            "waste=%.4fkWh cost_impact=₹%.0f savings=₹%.0f",
             tier, severity, device_id, root_cause,
             confidence, outlier_score,
+            health_data["equipment_health_index"],
+            health_data["remaining_useful_life_hours"],
+            float(energy_data.get("energy_waste_kwh", 0.0)),
+            cost_data["estimated_cost_impact_inr"],
+            cost_data["savings_from_detection_inr"],
         )
 
         return event
@@ -1091,6 +1823,8 @@ class EnhancedGasOverheatDetector:
         """Reset all tracked state for a device, or all devices."""
         self._base.reset(device_id or "")
         self._health_gate.reset(device_id)
+        self._energy_analyzer.reset(device_id)
+        self._health_tracker.reset(device_id)
         if device_id:
             self._ewma.pop(device_id, None)
             self._windows.pop(device_id, None)

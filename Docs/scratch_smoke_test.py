@@ -224,7 +224,7 @@ check("Synthetic generator is deterministic (seed=42)", test_deterministic)
 def test_payload():
     gen = generate_synthetic_readings()
     r = next(gen)
-    p = build_payload(r)
+    p = build_payload("test-device", r)
     assert isinstance(p, dict), "Expected dict"
     assert "data" in p or "kva_total" in p, "Payload missing expected keys"
     return "Keys: " + str(sorted(list(p.keys()))[:8]) + "..."

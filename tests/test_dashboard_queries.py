@@ -89,7 +89,7 @@ def _make_stroke_row(strokes: int = 1, time_offset_min: int = 0) -> dict:
         "site_id": "pune-isbm",
         "sensor_type": "stroke",
         "schema_version": "1.0",
-        "data": {"strokes_since_last_poll": strokes},
+        "data": {"strokes_in_interval": strokes},
     }
 
 

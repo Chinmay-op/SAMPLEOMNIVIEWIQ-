@@ -481,6 +481,214 @@ def _gas_overheat_fields(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _energy_wastage_fields(event: dict[str, Any]) -> dict[str, Any]:
+    """Template for energy wastage events (§8 — EnergyWastageAnalyzer)."""
+    waste_kwh = event.get("energy_waste_kwh", 0.0)
+    cost_inr = event.get("estimated_cost_impact_inr", 0.0)
+    efficiency = event.get("thermal_efficiency_pct", 100.0)
+    idle_burn = event.get("idle_burn_detected", False)
+    panel_temp = event.get("internal_panel_temp_c", 0.0)
+    baseline_cost = event.get("baseline_deviation_cost_inr", 0.0)
+
+    if idle_burn:
+        title = "💡 Idle-Burn Detected — Equipment Wasting Energy Without Load"
+        summary = (
+            f"Panel temperature is {panel_temp:.0f}°C with negligible current "
+            f"draw — the equipment is maintaining thermal mass with no "
+            f"productive output. Estimated energy waste: {waste_kwh:.2f} kWh "
+            f"(₹{cost_inr:,.0f})."
+        )
+        recommended_action = (
+            "Investigate whether the equipment should be in standby or "
+            "fully powered down. If idle period is expected to exceed 30 "
+            "minutes, initiate controlled cool-down to cut idle energy "
+            "burn. Check for stuck heaters, parasitic loads, or cooling "
+            "system failures."
+        )
+        do_not = (
+            "Do NOT abruptly power-cycle — thermal shock from rapid "
+            "cool-down can damage insulation and heater bands. Follow "
+            "the controlled shutdown procedure."
+        )
+    elif efficiency < 70.0:
+        title = "⚡ Thermal Inefficiency — Panel Running Hotter Than Load Justifies"
+        summary = (
+            f"Thermal efficiency index is {efficiency:.0f}% — the panel is "
+            f"significantly hotter than the electrical load justifies. This "
+            f"excess heat is wasted energy, likely from degraded connections, "
+            f"poor ventilation, or insulation faults. Baseline deviation cost: "
+            f"₹{baseline_cost:,.0f}."
+        )
+        recommended_action = (
+            "Schedule a thermal imaging inspection to identify hot spots. "
+            "Check panel ventilation (fans, filters), busbar connections "
+            "(torque verification), and cable terminations. Degraded "
+            "connections create resistive heating — re-termination is "
+            "often the fix."
+        )
+        do_not = (
+            "Do NOT increase ventilation as a permanent fix without "
+            "identifying the root cause — a loose connection generates "
+            "heat at the source and ventilation only masks it."
+        )
+    else:
+        title = "⚡ I²R Overload Loss — Electrical Overload Wasting Energy as Heat"
+        summary = (
+            f"Electrical overload detected: excess I²R resistive heating "
+            f"is converting {waste_kwh:.2f} kWh into waste heat "
+            f"(₹{cost_inr:,.0f}). Panel thermal efficiency: {efficiency:.0f}%."
+        )
+        recommended_action = (
+            "Review the load distribution on this circuit. Redistribute "
+            "load across phases if imbalanced. Check for overloaded "
+            "conductors or undersized cables. Consider upgrading conductor "
+            "cross-section if persistent overloading."
+        )
+        do_not = (
+            "Do NOT simply increase the breaker rating — the conductor "
+            "heating is the problem, and a higher-rated breaker removes "
+            "the protection without fixing the root cause."
+        )
+
+    return {
+        "severity": "WARNING",
+        "title": title,
+        "summary": summary,
+        "recommended_action": recommended_action,
+        "do_not": do_not,
+        "rupee_impact": (
+            f"₹{cost_inr:,.0f} estimated waste | "
+            f"Thermal efficiency: {efficiency:.0f}%"
+        ),
+        "urgency_window": "Schedule inspection within current shift",
+        "target_role": "maintenance_engineer",
+        "physical_rationale": (
+            f"Energy wastage in electrical panels comes from three sources: "
+            f"(1) I²R resistive losses from overloaded or degraded connections, "
+            f"(2) idle-burn where thermal mass is maintained without productive "
+            f"load, and (3) poor ventilation trapping waste heat. At "
+            f"{efficiency:.0f}% thermal efficiency, "
+            f"{'the panel is in idle-burn mode' if idle_burn else 'excess heating exceeds load-proportional expectations'}. "
+            f"Every 10°C above optimal increases resistive losses by ~4% "
+            f"(temperature coefficient of copper). Early intervention prevents "
+            f"accelerating degradation."
+        ),
+    }
+
+
+def _predictive_maintenance_fields(event: dict[str, Any]) -> dict[str, Any]:
+    """Template for predictive maintenance events (§9 — EquipmentHealthTracker)."""
+    hi = event.get("equipment_health_index", 100.0)
+    rul_hours = event.get("remaining_useful_life_hours", -1.0)
+    urgency = event.get("maintenance_urgency", "ROUTINE")
+    anomaly_hours = event.get("cumulative_anomaly_hours", 0.0)
+    degradation_rate = event.get("degradation_rate", 0.0)
+    cost_impact = event.get("estimated_cost_impact_inr", 0.0)
+    savings = event.get("savings_from_detection_inr", 0.0)
+
+    # Convert RUL to human-friendly units
+    if rul_hours > 0:
+        if rul_hours >= 24:
+            rul_display = f"~{rul_hours / 24:.0f} days"
+        else:
+            rul_display = f"~{rul_hours:.0f} hours"
+    else:
+        rul_display = "insufficient data for RUL estimate"
+
+    urgency_labels = {
+        "ROUTINE": ("ℹ️", "INFO", "routine scheduled maintenance"),
+        "SCHEDULED": ("⚠️", "WARNING", "planned maintenance within 2 weeks"),
+        "URGENT": ("🔴", "WARNING", "maintenance within 3 working days"),
+        "EMERGENCY": ("🚨", "CRITICAL", "immediate maintenance required"),
+    }
+    icon, severity, window_text = urgency_labels.get(
+        urgency, ("ℹ️", "INFO", "routine maintenance")
+    )
+
+    if urgency == "EMERGENCY":
+        title = f"{icon} EMERGENCY Maintenance — Equipment Health Critical (HI: {hi:.0f}/100)"
+        summary = (
+            f"Equipment Health Index has dropped to {hi:.0f}/100 with "
+            f"{anomaly_hours:.1f} cumulative anomaly-hours. Remaining useful "
+            f"life: {rul_display}. Continued operation risks unplanned "
+            f"breakdown costing ₹{cost_impact:,.0f}+."
+        )
+        recommended_action = (
+            "Stop the equipment at the earliest safe opportunity. Initiate "
+            "emergency maintenance work order. Priority: inspect all "
+            "connections, insulation, and thermal interfaces. Arrange "
+            "replacement parts for degraded components."
+        )
+    elif urgency == "URGENT":
+        title = f"{icon} Urgent Maintenance — Equipment Degrading (HI: {hi:.0f}/100)"
+        summary = (
+            f"Equipment Health Index is {hi:.0f}/100 and declining at "
+            f"{abs(degradation_rate):.3f} points/hour. Estimated time to "
+            f"failure: {rul_display}. {anomaly_hours:.1f} cumulative "
+            f"anomaly-hours recorded."
+        )
+        recommended_action = (
+            f"Schedule maintenance within the next 3 working days. Create "
+            f"CMMS work order with 'predictive-urgent' tag. Priority "
+            f"checks: thermal imaging, connection torque verification, "
+            f"insulation resistance testing."
+        )
+    else:
+        title = f"{icon} Predictive Maintenance — Equipment Health Trending Down (HI: {hi:.0f}/100)"
+        summary = (
+            f"Equipment Health Index is {hi:.0f}/100. Degradation rate: "
+            f"{abs(degradation_rate):.4f} points/hour. Remaining useful life: "
+            f"{rul_display}. Early detection enables planned maintenance "
+            f"saving ₹{savings:,.0f} vs. unplanned breakdown."
+        )
+        recommended_action = (
+            f"Include this equipment in the next {window_text} cycle. "
+            f"Log the Health Index trend for maintenance planning. "
+            f"No immediate action required — monitor for acceleration."
+        )
+
+    do_not = (
+        "Do NOT ignore declining Health Index trends — equipment "
+        "degradation is progressive. Unplanned breakdown costs 3–5× "
+        "more than scheduled preventive maintenance (parts expediting, "
+        "overtime labor, production loss)."
+    )
+
+    maint_costs = {
+        "ROUTINE": "₹5,000–10,000",
+        "SCHEDULED": "₹10,000–25,000",
+        "URGENT": "₹25,000–75,000",
+        "EMERGENCY": "₹1,00,000–3,00,000",
+    }
+    planned_cost = maint_costs.get(urgency, "₹5,000–15,000")
+
+    return {
+        "severity": severity,
+        "title": title,
+        "summary": summary,
+        "recommended_action": recommended_action,
+        "do_not": do_not,
+        "rupee_impact": (
+            f"Planned maintenance: {planned_cost} | "
+            f"Unplanned breakdown: ₹{cost_impact:,.0f}+ | "
+            f"Early detection savings: ₹{savings:,.0f}"
+        ),
+        "urgency_window": window_text.capitalize(),
+        "target_role": "maintenance_engineer",
+        "physical_rationale": (
+            f"The Equipment Health Index (HI: {hi:.0f}/100) is a composite "
+            f"score tracking cumulative damage from anomaly events. Each "
+            f"detected anomaly (overheating, gas emission, vibration) decays "
+            f"the HI proportionally to severity and confidence. The "
+            f"degradation rate ({abs(degradation_rate):.4f} points/hour) is "
+            f"computed via linear regression on the HI history. RUL is "
+            f"extrapolated as: (HI − failure_threshold) / |degradation_rate|. "
+            f"This follows cumulative-damage theory (Palmgren-Miner rule) "
+            f"where equipment fatigue accumulates from repeated stress cycles."
+        ),
+    }
+
+
 # ── Template registry ───────────────────────────────────────────────────
 
 CARD_TEMPLATES: dict[str, Any] = {
@@ -490,6 +698,8 @@ CARD_TEMPLATES: dict[str, Any] = {
     "critical_vibration": _critical_vibration_fields,
     "maintenance_risk": _maintenance_risk_fields,
     "gas_overheat": _gas_overheat_fields,
+    "energy_wastage": _energy_wastage_fields,
+    "predictive_maintenance": _predictive_maintenance_fields,
 }
 
 # Map scenario_label values to event_type keys (some may differ)
@@ -500,6 +710,8 @@ _SCENARIO_TO_EVENT: dict[str, str] = {
     "critical_vibration": "critical_vibration",
     "maintenance_risk": "maintenance_risk",
     "gas_overheat": "gas_overheat",
+    "energy_wastage": "energy_wastage",
+    "predictive_maintenance": "predictive_maintenance",
 }
 
 

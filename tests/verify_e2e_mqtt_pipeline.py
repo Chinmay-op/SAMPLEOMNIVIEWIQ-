@@ -13,7 +13,7 @@ from omniview.edge.bots.ambient_bot import generate_reading as a_read
 
 from omniview.ingest.validation import validate_payload
 
-BROKER = "broker.hivemq.com"
+BROKER = "localhost"
 PORT = 1883
 BASE_TOPIC = f"omniview/pune-isbm/test-{uuid.uuid4().hex[:8]}"
 
@@ -41,10 +41,10 @@ def on_message(client, userdata, msg):
         data = json.loads(payload_str)
         # Run the exact same validation as the ingest pipeline!
         validate_payload(sensor_type, "1.0", data)
-        print(f"  ✅ Validation PASSED for {sensor_type}!")
+        print(f"  [OK] Validation PASSED for {sensor_type}!")
         results["passed_validation"] += 1
     except Exception as e:
-        print(f"  ❌ Validation FAILED for {sensor_type}: {e}")
+        print(f"  [FAIL] Validation FAILED for {sensor_type}: {e}")
 
 if __name__ == "__main__":
     print(f"Starting E2E Pipeline Test against {BROKER}...")
@@ -82,6 +82,6 @@ if __name__ == "__main__":
     print(f"Messages received:  {results['received']}")
     print(f"Validation passes:  {results['passed_validation']}")
     if results['passed_validation'] == 7:
-        print("🎉 PIPELINE IS 100% HEALTHY AND PRD-COMPLIANT!")
+        print("PIPELINE IS 100% HEALTHY AND PRD-COMPLIANT!")
     else:
-        print("⚠️ Pipeline failed validation.")
+        print("Pipeline failed validation.")

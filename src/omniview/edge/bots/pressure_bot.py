@@ -100,34 +100,66 @@ def generate_reading() -> dict:
 
     is_leak = get_poisson_anomaly()
 
-    # --- Rigid State Machine Pneumatics ---
-    
-    # Check if edge state was externally manipulated for a leak (e.g. from plotting script)
+    # --- Phase 0: Physics-based Mass Balance Pneumatics ---
     external_leak = edge_state.get("pressure_leak", False)
-    if is_leak or external_leak:
-        target_pressure = 28.0
-    else:
-        target_pressure = 38.0
-        
-    diff = target_pressure - current_pressure
+    actual_leak = is_leak or external_leak
     
-    # Move towards target (linear pump up or leak down)
-    if diff > 0:
-        # Pumping up is fast (e.g. 5.0 bar per tick)
-        current_pressure += min(diff, 5.0) 
-        compressor_active = True
-    elif diff < 0:
-        # Leaking down is slower (e.g. 1.0 bar per tick)
-        current_pressure += max(diff, -1.0)
-        compressor_active = True
+    # 1. Capacity & Consumption
+    # If compressor is active, it pumps Q_comp (bar/min). dt is 1 min (60s poll)
+    q_comp_rate = 6.0 
+    q_comp = q_comp_rate if compressor_active else 0.0
+    
+    # Consumption from strokes
+    last_cycle_time = edge_state.get("last_cycle_time", 15.0)
+    if last_cycle_time <= 0:
+        last_cycle_time = 15.0
+        
+    is_running = edge_state.get("machine_running", True)
+    
+    if is_running:
+        strokes_per_min = 60.0 / last_cycle_time
+        # Each stroke consumes 0.2 bar
+        q_cons = strokes_per_min * 0.2
     else:
+        q_cons = 0.0
+        
+    # Leak is proportional to pressure: Q_leak = C_L * P
+    # A true leak (0.025 * 38 = 0.95 bar/min), micro-leak (0.001 * 38 = 0.038 bar/min)
+    c_l = 0.025 if actual_leak else 0.001
+    q_leak = c_l * current_pressure
+    
+    # Mass balance for the tick
+    dp = q_comp - q_cons - q_leak
+    current_pressure += dp
+    
+    # Add tiny mechanical flutter
+    current_pressure += wanderer.get('press_noise', 0.02, 0.1)
+    
+    # Clamp to physical range
+    current_pressure = max(0.0, min(current_pressure, 40.0))
+    
+    # Hysteresis compressor control (Cut-in at 32, Cut-out at 38)
+    if current_pressure <= 32.0:
+        compressor_active = True
+    elif current_pressure >= 38.0:
         compressor_active = False
-        
-    # Add tiny mechanical flutter when holding a line
-    if abs(current_pressure - target_pressure) < 0.1:
-        current_pressure = target_pressure + wanderer.get('press_noise', 0.02, 0.1)
-        
-    current_pressure = max(0.0, min(current_pressure, 40.0)) # Clamp 0-40 bar
+
+    # Write ground truth to file for Phase 0 validation
+    gt_file = Path("data/pressure_ground_truth.jsonl")
+    gt_file.parent.mkdir(exist_ok=True, parents=True)
+    with open(gt_file, "a") as f:
+        gt = {
+            "timestamp": datetime.datetime.fromtimestamp(sim_clock.now()).isoformat() + "Z",
+            "is_leak": actual_leak,
+            "c_l": c_l,
+            "q_comp": q_comp,
+            "q_cons": q_cons,
+            "q_leak": q_leak,
+            "dp": dp,
+            "compressor_active": compressor_active,
+            "pressure": current_pressure
+        }
+        f.write(json.dumps(gt) + "\n")
 
     # 5. Ugly Reality (Benign Glitch)
     # 0.1% chance of ADC momentary fault
@@ -137,9 +169,9 @@ def generate_reading() -> dict:
         reported_pressure = 0.0
 
     # Trend calculation
-    if diff > 1.0:
+    if dp > 0.5:
         trend = "RISING"
-    elif diff < -1.0:
+    elif dp < -0.5:
         trend = "FALLING"
     else:
         trend = "STABLE"

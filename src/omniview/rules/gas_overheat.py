@@ -143,6 +143,24 @@ class GasOverheatEvent:
     ewma_z_temp: float = 0.0
     outlier_score: float = 0.0
 
+    # §8 Energy wastage enrichment (populated by EnergyWastageAnalyzer)
+    energy_waste_kwh: float = 0.0
+    thermal_efficiency_pct: float = 100.0
+    idle_burn_detected: bool = False
+    baseline_deviation_cost_inr: float = 0.0
+
+    # §9 Predictive maintenance enrichment (populated by EquipmentHealthTracker)
+    equipment_health_index: float = 100.0
+    remaining_useful_life_hours: float = -1.0  # -1 = insufficient data
+    maintenance_urgency: str = ""  # ROUTINE | SCHEDULED | URGENT | EMERGENCY
+    cumulative_anomaly_hours: float = 0.0
+    degradation_rate: float = 0.0
+
+    # §10 Cost impact enrichment (populated by CostImpactEstimator)
+    estimated_cost_impact_inr: float = 0.0
+    savings_from_detection_inr: float = 0.0
+    downtime_risk_hours: float = 0.0
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-safe plain dict."""
         d = asdict(self)

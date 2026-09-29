@@ -249,7 +249,7 @@ def get_energy_and_strokes(
 
     total_strokes = 0
     for r in stroke_rows:
-        strokes = _extract_data_field(r, "strokes_since_last_poll", 0)
+        strokes = _extract_data_field(r, "strokes_in_interval", 0)
         total_strokes += int(strokes)
 
     # SEC = kWh / (strokes / 1000)
