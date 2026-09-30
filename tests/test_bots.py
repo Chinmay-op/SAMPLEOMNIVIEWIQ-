@@ -183,4 +183,3 @@ if __name__ == "__main__":
     test_gas_bot_csv_mapping()
     test_gas_bot_csv_mapping_failure()
     print("\n🎉 All tests passed!")
-

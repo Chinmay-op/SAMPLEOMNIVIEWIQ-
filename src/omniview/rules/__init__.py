@@ -2,7 +2,10 @@
 omniview.rules — Rule Engine & Intelligence Layer (Layers 3–4)
 ===============================================================
 
-Owned by Lead (Dnyandev). Package scaffolded here so cross-imports resolve.
+Real-time detection rules that process sensor telemetry and emit events.
+
+Active modules:
+* ambient_correlation  — Ambient → cooling-load / demand correlation (S3)
 
 Shipped modules:
 * Action-card generator from rule/PdM events        (OI-69)
@@ -50,6 +53,10 @@ from omniview.rules.detectors_live import (
     CycleMetrics,
     build_default_registry,
 )
+from omniview.rules.ambient_correlation import (
+    AmbientCorrelationRule, 
+    CorrelationEvent,
+)
 
 __all__ = [
     # Action Cards
@@ -77,6 +84,7 @@ __all__ = [
     "DetectorEntry",
     "CycleMetrics",
     "build_default_registry",
+    # Ambient Correlation (S3)
+    "AmbientCorrelationRule",
+    "CorrelationEvent",
 ]
-
-
