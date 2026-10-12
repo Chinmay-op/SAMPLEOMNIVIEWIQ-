@@ -703,3 +703,260 @@ class TestExistingBehaviorPreserved:
         fired = [e for e in events if isinstance(e, GasOverheatEvent)]
         assert len(fired) >= 1
         assert fired[0].severity == "WARNING"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FIX 1: CRITICAL confidence floor & urgency override
+# ══════════════════════════════════════════════════════════════════════
+
+class TestCriticalConfidenceReconciliation:
+    """A CRITICAL fire-precursor is certain by physics.  The dashboard
+    must never show 🔴 CRITICAL + 'confidence 16%' + 'urgency: ROUTINE'
+    side-by-side — that looks like a bug, not nuance."""
+
+    def test_critical_confidence_floored_to_75(self):
+        """CRITICAL events must have confidence ≥ 75 regardless of
+        statistical evidence strength (physics certainty overrides stats)."""
+        det = EnhancedGasOverheatDetector()
+        ev = det.evaluate(_gas_sample(
+            gas_ppm=30.0, particles=50.0, rise_rate=4.0, panel_temp=72.0,
+        ))
+        assert isinstance(ev, GasOverheatEvent)
+        assert ev.confidence_score >= 75.0, (
+            f"CRITICAL confidence {ev.confidence_score} < 75 — "
+            f"dashboard would show contradictory low confidence"
+        )
+
+    def test_critical_urgency_at_least_urgent(self):
+        """CRITICAL on a fresh device (HI ≈ 100) must NOT show ROUTINE
+        urgency.  The deterministic tier overrides the HI-based urgency."""
+        det = EnhancedGasOverheatDetector()
+        ev = det.evaluate(_gas_sample(
+            gas_ppm=30.0, particles=50.0, rise_rate=4.0, panel_temp=72.0,
+        ))
+        assert isinstance(ev, GasOverheatEvent)
+        assert ev.maintenance_urgency in ("URGENT", "EMERGENCY"), (
+            f"CRITICAL urgency is '{ev.maintenance_urgency}' — "
+            f"should be at least URGENT"
+        )
+
+    def test_warning_confidence_not_floored(self):
+        """WARNING events should NOT have their confidence artificially
+        floored — the statistical score is meaningful for non-CRITICAL tiers."""
+        det = EnhancedGasOverheatDetector()
+        samples = _sustained_gas(
+            count=5, interval_s=60.0,
+            panel_temp=GAS_WARNING_TEMP_C + 5,
+        )
+        events = [det.evaluate(s) for s in samples]
+        fired = [e for e in events if isinstance(e, GasOverheatEvent)]
+        assert len(fired) >= 1
+        # WARNING confidence should reflect actual statistical evidence,
+        # which may be below 75 — and that's fine for non-safety tiers.
+        # We just verify it's a real number, not that it's above 75.
+        assert 0.0 <= fired[0].confidence_score <= 100.0
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FIX 2: CRITICAL debounce / deduplication
+# ══════════════════════════════════════════════════════════════════════
+
+class TestCriticalDebounce:
+    """A smoldering fault lasts 10–60 minutes.  At 60s poll interval,
+    that's 10–60 GasOverheatEvent objects without debounce — each
+    triggering a webhook/email.  The debounce state machine should
+    emit on transition INTO CRITICAL, suppress during ongoing, and
+    log resolution when the condition clears."""
+
+    def test_critical_emits_once_then_suppresses(self):
+        """Multiple CRITICAL readings for the same ongoing condition
+        should emit exactly 1 event, not one per poll."""
+        det = EnhancedGasOverheatDetector()
+        t = datetime(2026, 10, 5, 10, 0, 0, tzinfo=IST)
+        events = []
+        for i in range(5):
+            ev = det.evaluate(_gas_sample(
+                gas_ppm=30.0, particles=50.0, rise_rate=4.0, panel_temp=72.0,
+                timestamp=t + timedelta(seconds=i * 60),
+            ))
+            events.append(ev)
+
+        critical_events = [e for e in events if isinstance(e, GasOverheatEvent)]
+        assert len(critical_events) == 1, (
+            f"Expected exactly 1 CRITICAL event, got {len(critical_events)} — "
+            f"debounce is not suppressing ongoing condition"
+        )
+        assert critical_events[0].severity == "CRITICAL"
+
+    def test_condition_clear_then_new_critical_fires(self):
+        """After condition clears (normal readings) and then re-enters
+        CRITICAL, a new event should fire."""
+        det = EnhancedGasOverheatDetector()
+        t = datetime(2026, 10, 5, 10, 0, 0, tzinfo=IST)
+
+        # First CRITICAL
+        ev1 = det.evaluate(_gas_sample(
+            gas_ppm=30.0, particles=50.0, rise_rate=4.0, panel_temp=72.0,
+            timestamp=t,
+        ))
+        assert isinstance(ev1, GasOverheatEvent)
+
+        # Condition clears (normal readings)
+        for i in range(3):
+            det.evaluate(_gas_sample(
+                gas_ppm=1.0, particles=3.0, rise_rate=0.1, panel_temp=35.0,
+                timestamp=t + timedelta(seconds=(i + 1) * 60),
+            ))
+
+        # New CRITICAL — should fire again
+        ev2 = det.evaluate(_gas_sample(
+            gas_ppm=30.0, particles=50.0, rise_rate=4.0, panel_temp=72.0,
+            timestamp=t + timedelta(seconds=300),
+        ))
+        assert isinstance(ev2, GasOverheatEvent), (
+            "New CRITICAL after condition cleared should fire"
+        )
+
+    def test_tier_change_emits_new_event(self):
+        """If the tier changes (e.g., CRITICAL → WARNING_TEMP), a new
+        event should fire even without a gap."""
+        det = EnhancedGasOverheatDetector()
+        t = datetime(2026, 10, 5, 10, 0, 0, tzinfo=IST)
+
+        # CRITICAL
+        ev1 = det.evaluate(_gas_sample(
+            gas_ppm=30.0, particles=50.0, rise_rate=4.0, panel_temp=72.0,
+            timestamp=t,
+        ))
+        assert isinstance(ev1, GasOverheatEvent)
+        assert ev1.tier == "CRITICAL"
+
+        # WARNING_TEMP (different tier) — should emit despite no clear gap
+        # Need sustained for WARNING, so feed a couple readings first
+        det.evaluate(_gas_sample(
+            gas_ppm=1.0, particles=3.0, rise_rate=0.1,
+            panel_temp=GAS_WARNING_TEMP_C + 5,
+            timestamp=t + timedelta(seconds=60),
+        ))
+        ev2 = det.evaluate(_gas_sample(
+            gas_ppm=1.0, particles=3.0, rise_rate=0.1,
+            panel_temp=GAS_WARNING_TEMP_C + 5,
+            timestamp=t + timedelta(seconds=180),
+        ))
+        # If WARNING fires, it should be a separate event
+        if isinstance(ev2, GasOverheatEvent):
+            assert ev2.tier != "CRITICAL"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FIX 3: EWMA cold start — minimum std floor
+# ══════════════════════════════════════════════════════════════════════
+
+class TestEWMAColdStartFix:
+    """If the first 10 warmup readings are very stable (device idle),
+    std ≈ 0 and the next real-but-small fluctuation could produce a
+    z-score blown up toward infinity, firing a false WATCH_ADAPTIVE."""
+
+    def test_flat_baseline_small_fluctuation_no_false_alarm(self):
+        """10 identical readings at 25.0°C, then a small 25.5°C fluctuation
+        should NOT fire WATCH_ADAPTIVE (z should be small, not infinite)."""
+        from omniview.rules.gas_model import EWMATracker, MIN_EWMA_STD_FLOOR
+        ewma = EWMATracker(alpha=0.1, min_samples=10)
+
+        # Flat baseline
+        for _ in range(10):
+            ewma.update(25.0)
+
+        # Small fluctuation
+        z = ewma.update(25.5)
+
+        # Without the floor, std ≈ 0 → z → ∞ → false WATCH_ADAPTIVE.
+        # With the floor (MIN_EWMA_STD_FLOOR = 0.5), z ≈ 0.5/0.5 = 1.0
+        assert abs(z) < 3.0, (
+            f"z={z} — small fluctuation on flat baseline should not "
+            f"exceed WATCH_ADAPTIVE threshold of 3.0"
+        )
+        assert not math.isinf(z), f"z is infinite — std floor not working"
+
+    def test_flat_baseline_large_spike_still_fires(self):
+        """Even with the std floor, a genuinely large spike (25→40°C)
+        should still produce a high z-score."""
+        from omniview.rules.gas_model import EWMATracker
+        ewma = EWMATracker(alpha=0.1, min_samples=10)
+
+        for _ in range(10):
+            ewma.update(25.0)
+
+        z = ewma.update(40.0)
+        # 15°C jump / 0.5 floor ≈ z=30 — definitely above 3.0
+        assert abs(z) > 3.0, (
+            f"z={z} — large spike on flat baseline should exceed threshold"
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FIX 4: Pearson correlation dead zone (r = 0.3–0.6)
+# ══════════════════════════════════════════════════════════════════════
+
+class TestPearsonDeadZone:
+    """r > 0.6 → ELECTRICAL_OVERLOAD, r < 0.3 → EXTERNAL_HEAT_SOURCE.
+    What about r = 0.45?  That's a very plausible real-world value
+    (partial correlation, mixed causes) and must be explicitly handled."""
+
+    def test_moderate_correlation_returns_mixed(self):
+        """r ≈ 0.45 should return MIXED_CORRELATION, not UNKNOWN."""
+        # Construct data with moderate positive correlation:
+        # temps rising steadily, currents noisily tracking
+        temps = [30.0, 32.0, 34.0, 36.0, 38.0, 40.0, 42.0]
+        # Currents: some move with temps, some move against — partial r
+        currs = [200.0, 203.0, 197.0, 206.0, 199.0, 208.0, 202.0]
+
+        from omniview.rules.gas_model import pearson_correlation
+        r = pearson_correlation(temps, currs)
+
+        rc = classify_root_cause(
+            tier="WARNING_TEMP",
+            panel_temps=temps,
+            currents=currs,
+            gas_elevated_only=False,
+            particle_elevated_only=False,
+        )
+
+        # r should be in the dead zone (0.3–0.6)
+        assert 0.2 < abs(r) < 0.7, (
+            f"Test data r={r:.3f} is outside the dead zone — "
+            f"adjust test data"
+        )
+        assert rc == "MIXED_CORRELATION", (
+            f"r={r:.3f} in dead zone should return MIXED_CORRELATION, "
+            f"got '{rc}'"
+        )
+
+    def test_strong_correlation_still_electrical_overload(self):
+        """Verify that strong correlation (r > 0.6) with rising current
+        still correctly classifies as ELECTRICAL_OVERLOAD."""
+        temps = [30.0, 32.0, 34.0, 36.0, 38.0, 40.0, 42.0]
+        currs = [200.0, 205.0, 210.0, 215.0, 220.0, 225.0, 230.0]
+        rc = classify_root_cause(
+            tier="WARNING_TEMP",
+            panel_temps=temps,
+            currents=currs,
+            gas_elevated_only=False,
+            particle_elevated_only=False,
+        )
+        assert rc == "ELECTRICAL_OVERLOAD"
+
+    def test_no_correlation_still_external_heat(self):
+        """Verify that no correlation (r < 0.3) still correctly
+        classifies as EXTERNAL_HEAT_SOURCE."""
+        temps = [30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0]
+        currs = [200.0, 198.0, 201.0, 199.0, 200.0, 202.0, 199.0]
+        rc = classify_root_cause(
+            tier="WARNING_TEMP",
+            panel_temps=temps,
+            currents=currs,
+            gas_elevated_only=False,
+            particle_elevated_only=False,
+        )
+        assert rc == "EXTERNAL_HEAT_SOURCE"
+

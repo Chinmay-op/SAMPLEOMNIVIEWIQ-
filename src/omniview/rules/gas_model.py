@@ -55,6 +55,13 @@ from omniview.rules.gas_overheat import (
 
 logger = logging.getLogger(__name__)
 
+# Minimum EWMA std floor to prevent z-score explosion on flat baselines.
+# If a device idles at exactly 25.0°C for 10 readings, std ≈ 0 and the
+# next real fluctuation (25.2°C) would produce z → ∞.  This floor caps
+# the z-score at ~(delta / MIN_STD_FLOOR).  Chosen so that a 0.5-unit
+# deviation (normal jitter) produces z ≈ 1.0, well below the 3.0 threshold.
+MIN_EWMA_STD_FLOOR: float = 0.5
+
 
 # ══════════════════════════════════════════════════════════════════════
 # §1  New single-signal thresholds
@@ -281,9 +288,10 @@ class EWMATracker:
             return 0.0
 
         std = math.sqrt(self._var) if self._var > 0 else 0.0
-        if std < 1e-9:
-            self._last_z = 0.0
-            return 0.0
+        # Apply minimum std floor to prevent z-score explosion on flat
+        # baselines (e.g., device idle at exactly 25.0°C for 10 readings
+        # → std ≈ 0 → next tiny fluctuation produces z → ∞).
+        std = max(std, MIN_EWMA_STD_FLOOR)
 
         self._last_z = (x - self._mean) / std
         return self._last_z
@@ -469,6 +477,10 @@ ROOT_CAUSES: dict[str, str] = {
     "INSULATION_DEGRADATION": (
         "Gas + particles + heat — classic wire insulation breakdown"
     ),
+    "MIXED_CORRELATION": (
+        "Moderate correlation between panel temp and current (r=0.3–0.6) — "
+        "possible partial I²R contribution with other heat sources"
+    ),
     "UNKNOWN": (
         "Insufficient data or ambiguous correlation for "
         "root-cause classification"
@@ -565,7 +577,10 @@ def classify_root_cause(
     if abs(r) < 0.3:
         return "EXTERNAL_HEAT_SOURCE"
 
-    return "UNKNOWN"
+    # Dead zone: r = 0.3–0.6 — partial correlation, likely mixed causes.
+    # Explicitly labelled so it's visible in dashboards and doesn't silently
+    # fall through to UNKNOWN (which implies "not enough data").
+    return "MIXED_CORRELATION"
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1529,6 +1544,11 @@ class EnhancedGasOverheatDetector:
         self._current_history: dict[str, deque[float]] = {}
         # Single-signal sustained gate state (instance-level, not class-level)
         self._ss_state: dict[str, dict[str, Any]] = {}
+        # Debounce: open-event state per (device_id, tier) to prevent
+        # emitting duplicate events on every poll cycle during a sustained
+        # condition.  Maps device_id → {"tier": str, "opened_at": float}.
+        # Only emits on transition INTO a tier; suppresses while ongoing.
+        self._open_events: dict[str, dict[str, Any]] = {}
 
     def evaluate(
         self, sample: dict[str, Any]
@@ -1629,7 +1649,11 @@ class EnhancedGasOverheatDetector:
         )
 
         # ── Run base detector for tier classification ────────────────
-        # Inject single-signal tiers into the sample before base eval
+        # Inject computed derivatives (C/min) into sample before base eval
+        # so it can classify CRITICAL tiers correctly on raw payloads.
+        if "data" in sample and temp_slope is not None:
+            sample["data"]["thermal_rise_rate"] = temp_slope * 60.0
+            
         base_event = self._base.evaluate(sample)
 
         # Check if single-signal tiers should fire (base missed them)
@@ -1660,6 +1684,14 @@ class EnhancedGasOverheatDetector:
             ewma_anomaly = True
 
         if tier is None:
+            # Condition cleared — if we had an open event, it's now resolved
+            prev_open = self._open_events.pop(device_id, None)
+            if prev_open is not None:
+                logger.info(
+                    "Event RESOLVED on %s — was %s since %.0fs ago",
+                    device_id, prev_open.get("tier", "?"),
+                    now_epoch - prev_open.get("opened_at", now_epoch),
+                )
             return None
 
         # §3: Root-cause classification
@@ -1673,6 +1705,25 @@ class EnhancedGasOverheatDetector:
             particle_elevated_only=particle_elevated_only,
         )
 
+        # ── Debounce: suppress duplicate events for ongoing conditions ──
+        # A real smoldering fault lasts 10–60 min (per gas_bot physics).
+        # At 60s poll interval that's 10–60 polls.  Without debounce,
+        # each poll emits a separate event → 10–60 webhooks/emails.
+        # We only emit on TRANSITION into a tier; ongoing polls are
+        # suppressed.  WARNING/INFO tiers are already gated by the base
+        # detector's sustained-duration logic, but CRITICAL has no gate.
+        prev_open = self._open_events.get(device_id)
+        if prev_open is not None and prev_open.get("tier") == tier:
+            # Same tier still active — this is an ongoing condition,
+            # not a new event.  Skip emission.
+            return None
+
+        # New event or tier changed — record the open event
+        self._open_events[device_id] = {
+            "tier": tier,
+            "opened_at": now_epoch,
+        }
+
         # §6: Confidence score
         confidence = compute_confidence_score(
             gas_ppm=gas_ppm,
@@ -1684,6 +1735,15 @@ class EnhancedGasOverheatDetector:
             gas_acceleration=gas_accel,
             temp_acceleration=temp_accel,
         )
+
+        # ── Reconcile confidence/urgency with deterministic tier ──────
+        # A CRITICAL fire-precursor is certain by physics — the confidence
+        # score (statistical evidence strength) must not contradict the
+        # deterministic tier.  Without this, the dashboard shows
+        # "🔴 CRITICAL" + "confidence 16%" + "urgency: ROUTINE" on a
+        # device's first-ever anomaly, which looks like a bug.
+        if tier == "CRITICAL":
+            confidence = max(confidence, 75.0)
 
         # §7: Outlier score
         outlier_score = self._outlier.score({
@@ -1716,6 +1776,17 @@ class EnhancedGasOverheatDetector:
             confidence_score=confidence,
             outlier_score=outlier_score,
         )
+
+        # ── Reconcile maintenance urgency with deterministic tier ─────
+        # A CRITICAL fire-precursor needs at minimum URGENT response,
+        # even if the device's HI hasn't had time to decay yet (first
+        # anomaly on a fresh device → HI ≈ 100 → ROUTINE).  The
+        # deterministic safety tier is primary; HI-based urgency is
+        # secondary wear tracking.
+        if tier == "CRITICAL" and health_data["maintenance_urgency"] in (
+            "ROUTINE", "SCHEDULED",
+        ):
+            health_data["maintenance_urgency"] = "URGENT"
 
         # ── §10: Cost impact estimation ──────────────────────────────
         cost_data = self._cost_estimator.estimate(
@@ -1829,12 +1900,16 @@ class EnhancedGasOverheatDetector:
             self._ewma.pop(device_id, None)
             self._windows.pop(device_id, None)
             self._temp_history.pop(device_id, None)
+            self._open_events.pop(device_id, None)
+            self._ss_state.pop(device_id, None)
         else:
             self._ewma.clear()
             self._windows.clear()
             self._temp_history.clear()
             self._current_history.clear()
             self._cross_family.reset()
+            self._open_events.clear()
+            self._ss_state.clear()
 
     # ── Single-signal sustained gate ─────────────────────────────────
 
