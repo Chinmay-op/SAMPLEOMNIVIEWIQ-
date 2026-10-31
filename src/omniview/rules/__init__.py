@@ -57,6 +57,16 @@ from omniview.rules.ambient_correlation import (
     AmbientCorrelationRule, 
     CorrelationEvent,
 )
+from omniview.rules.cooling_malfunction import (
+    CoolingMalfunctionDetector,
+    CoolingMalfunctionEvent,
+    evaluate_cooling_malfunction,
+)
+from omniview.rules.predictive_maintenance import (
+    run_stage_a_pipeline,
+    predict_maintenance_risk,
+    DEMO_PRIORS,
+)
 
 __all__ = [
     # Action Cards
@@ -87,4 +97,12 @@ __all__ = [
     # Ambient Correlation (S3)
     "AmbientCorrelationRule",
     "CorrelationEvent",
+    # Predictive Maintenance (Stage A / Feature 2)
+    "run_stage_a_pipeline",
+    "predict_maintenance_risk",
+    "DEMO_PRIORS",
+    # Cooling Malfunction (F07 / OI-145 / LLD §3)
+    "CoolingMalfunctionDetector",
+    "CoolingMalfunctionEvent",
+    "evaluate_cooling_malfunction",
 ]

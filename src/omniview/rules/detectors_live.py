@@ -68,6 +68,7 @@ from omniview.rules.lazy_idle import LazyIdleDetector, LazyIdleEvent
 from omniview.rules.pressure_leak import PressureLeakDetector, PressureLeakEvent
 from omniview.rules.stroke_jam import StrokeJamDetector, StrokeAnomalyEvent
 from omniview.rules.vibration_zone import VibrationZoneDetector, VibrationZoneEvent
+from omniview.rules.cooling_malfunction import CoolingMalfunctionDetector, CoolingMalfunctionEvent
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,11 @@ def build_default_registry() -> list[DetectorEntry]:
             name="stroke_jam",
             detector=StrokeJamDetector(),
             sensor_types=["stroke"],
+        ),
+        DetectorEntry(
+            name="cooling_malfunction",
+            detector=CoolingMalfunctionDetector(),
+            sensor_types=["electrical", "thermal", "cooling"],
         ),
     ]
 

@@ -444,8 +444,8 @@ class TestGenerateCardsFromAlerts:
 class TestTemplateCoverage:
     """Verify all expected templates are registered."""
 
-    def test_eight_templates_registered(self):
-        """CARD_TEMPLATES has entries for all 8 event types."""
+    def test_all_templates_registered(self):
+        """CARD_TEMPLATES has entries for all registered event types."""
         expected = {
             "md_nearmiss",
             "lazy_idle",
@@ -455,6 +455,7 @@ class TestTemplateCoverage:
             "gas_overheat",
             "energy_wastage",
             "predictive_maintenance",
+            "cooling_malfunction",
         }
         assert set(CARD_TEMPLATES.keys()) == expected
 

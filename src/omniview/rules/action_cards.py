@@ -689,6 +689,56 @@ def _predictive_maintenance_fields(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _cooling_malfunction_fields(event: dict[str, Any]) -> dict[str, Any]:
+    """Template for cooling_malfunction events (high electrical energy + low cooling temp)."""
+    power_kw = float(
+        event.get("active_power_kw")
+        or event.get("kw")
+        or event.get("power_kw")
+        or event.get("active_energy_kwh")
+        or 65.0
+    )
+    temp_c = float(
+        event.get("cooling_temp_c")
+        or event.get("barrel_temp_c")
+        or event.get("zone_temp_c")
+        or event.get("temp_c")
+        or 45.0
+    )
+    device_id = str(event.get("device_id") or "ISBM-01")
+
+    return {
+        "severity": "WARNING",
+        "title": "🧊 Cooling Malfunction — High Energy Draw with Low Barrel Temperature",
+        "summary": (
+            f"Machine {device_id} is drawing high electrical power ({power_kw:.1f} kW) "
+            f"while cooling/barrel temperature is anomalously low ({temp_c:.1f} °C). "
+            f"This divergence indicates possible cooling valve stuck open, heater burnout, "
+            f"or temperature sensor malfunction."
+        ),
+        "recommended_action": (
+            "Service or inspect the cooling circuit, barrel heaters, and RTD temperature "
+            "sensors during the next maintenance window or shift transition."
+        ),
+        "do_not": (
+            "Do NOT stop the machine — this is a service/inspection advisory for thermal "
+            "efficiency, not an immediate safety trip."
+        ),
+        "rupee_impact": (
+            "Energy waste: ~₹1,500–₹4,500/day from concurrent heating and cooling or unmetered losses"
+        ),
+        "urgency_window": "Service or inspect during next scheduled shift",
+        "target_role": "maintenance_engineer",
+        "physical_rationale": (
+            f"When electrical power is high ({power_kw:.1f} kW), the machine's heaters or drives "
+            f"are actively consuming energy. An anomalously low barrel/cooling temperature ({temp_c:.1f} °C) "
+            f"signals that either cooling water is continuously circulating against active heaters, "
+            f"heater elements have failed open-circuit while motor load remains high, or sensor feedback "
+            f"is disconnected. The card advises inspection rather than machine stoppage."
+        ),
+    }
+
+
 # ── Template registry ───────────────────────────────────────────────────
 
 CARD_TEMPLATES: dict[str, Any] = {
@@ -700,6 +750,7 @@ CARD_TEMPLATES: dict[str, Any] = {
     "gas_overheat": _gas_overheat_fields,
     "energy_wastage": _energy_wastage_fields,
     "predictive_maintenance": _predictive_maintenance_fields,
+    "cooling_malfunction": _cooling_malfunction_fields,
 }
 
 # Map scenario_label values to event_type keys (some may differ)
@@ -712,6 +763,7 @@ _SCENARIO_TO_EVENT: dict[str, str] = {
     "gas_overheat": "gas_overheat",
     "energy_wastage": "energy_wastage",
     "predictive_maintenance": "predictive_maintenance",
+    "cooling_malfunction": "cooling_malfunction",
 }
 
 

@@ -1652,7 +1652,20 @@ class EnhancedGasOverheatDetector:
         # Inject computed derivatives (C/min) into sample before base eval
         # so it can classify CRITICAL tiers correctly on raw payloads.
         if "data" in sample and temp_slope is not None:
-            sample["data"]["thermal_rise_rate"] = temp_slope * 60.0
+            existing_rise = sample["data"].get(
+                "thermal_rise_rate",
+                sample["data"].get("rate_of_thermal_rise_c_per_min"),
+            )
+            computed_rise = temp_slope * 60.0
+            if existing_rise is not None:
+                try:
+                    sample["data"]["thermal_rise_rate"] = max(
+                        float(existing_rise), computed_rise
+                    )
+                except (ValueError, TypeError):
+                    sample["data"]["thermal_rise_rate"] = computed_rise
+            else:
+                sample["data"]["thermal_rise_rate"] = computed_rise
             
         base_event = self._base.evaluate(sample)
 

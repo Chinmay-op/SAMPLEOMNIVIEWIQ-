@@ -144,3 +144,13 @@ PRESSURE_MIN_LOADED_SAMPLES: int = int(
 VIB_ZONE_B_BOUNDARY: float = float(os.getenv("VIB_ZONE_B_BOUNDARY", "2.8"))
 VIB_ZONE_C_BOUNDARY: float = float(os.getenv("VIB_ZONE_C_BOUNDARY", "7.1"))
 VIB_ZONE_D_BOUNDARY: float = float(os.getenv("VIB_ZONE_D_BOUNDARY", "18.0"))
+
+# ── Rule: F07 Cooling Malfunction (cooling_malfunction.py / LLD §3) ─────
+# PLACEHOLDER thresholds — high energy + low cooling/barrel temperature
+COOLING_POWER_THRESHOLD_KW: float = float(
+    os.getenv("COOLING_POWER_THRESHOLD_KW", "50.0")
+)
+COOLING_TEMP_LOW_C: float = float(
+    os.getenv("COOLING_TEMP_LOW_C", "100.0")
+)
+
