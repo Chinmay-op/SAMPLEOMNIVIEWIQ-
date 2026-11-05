@@ -18,6 +18,8 @@ Reference:
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from omniview.predictive.priors import (
@@ -49,6 +51,10 @@ from omniview.predictive.events import (
 from omniview.predictive.batch_runner import (
     HealthIndexPipeline,
     BatchResult,
+)
+from omniview.predictive.maintenance_log import (
+    MaintenanceLogger,
+    MaintenanceEvent,
 )
 from omniview.rules.cooling_malfunction import (
     CoolingMalfunctionEvent,
@@ -171,11 +177,14 @@ def run_stage_a_pipeline(
         emit_events_for=emit_events_for,
         synthetic=synthetic,
     )
-    return pipeline.run_batch(
+    batch_result = pipeline.run_batch(
         machine_id=machine_id,
         electrical_readings=readings,
         vibration_readings=vibration_readings,
     )
+    if batch_result.latest_hi is not None:
+        MachineServiceRegistry.get_instance().record_hi(batch_result.latest_hi)
+    return batch_result
 
 
 def predict_maintenance_risk(
@@ -220,6 +229,7 @@ def predict_maintenance_risk(
         Layer 3 compliant ``maintenance_risk`` event dictionary.
     """
     if isinstance(hi_result, HealthIndexResult):
+        MachineServiceRegistry.get_instance().record_hi(hi_result)
         target_machine = machine_id or hi_result.machine_id
         return build_maintenance_risk_event(
             hi_result=hi_result,
@@ -234,6 +244,7 @@ def predict_maintenance_risk(
 
     # If latest_row is already a HealthIndexResult
     if isinstance(latest_row, HealthIndexResult):
+        MachineServiceRegistry.get_instance().record_hi(latest_row)
         return build_maintenance_risk_event(
             hi_result=latest_row,
             cusum_alerts=cusum_alerts,
@@ -265,6 +276,7 @@ def predict_maintenance_risk(
         machine_id=m_id,
         date_str=row_date,
     )
+    MachineServiceRegistry.get_instance().record_hi(computed_hi)
 
     return build_maintenance_risk_event(
         hi_result=computed_hi,
@@ -272,6 +284,159 @@ def predict_maintenance_risk(
         device_id=device_id or m_id,
         synthetic=synthetic,
     )
+
+
+# ── Cross-Feature Service Flag Registry & API (OI-154 / LLD §3, §4, §5) ────
+
+
+class MachineServiceRegistry:
+    """In-memory service and maintenance state registry for factory machines.
+
+    Tracks active high-risk Health Index states, scheduled maintenance windows,
+    and manual service flags across Feature 2, Feature 3, and Feature 4.
+    """
+
+    _instance: MachineServiceRegistry | None = None
+
+    def __init__(self) -> None:
+        self._manual_status: dict[str, bool] = {}
+        self._latest_hi: dict[str, HealthIndexResult] = {}
+        self._scheduled_windows: dict[str, list[dict[str, Any]]] = {}
+
+    @classmethod
+    def get_instance(cls) -> MachineServiceRegistry:
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def set_status(self, machine_id: str, in_maintenance: bool = True) -> None:
+        """Manually override machine maintenance status."""
+        self._manual_status[machine_id] = in_maintenance
+
+    def record_hi(self, hi_result: HealthIndexResult) -> None:
+        """Record latest Health Index observation for a machine."""
+        self._latest_hi[hi_result.machine_id] = hi_result
+
+    def schedule_maintenance(
+        self,
+        machine_id: str,
+        start_date: str,
+        downtime_hours: float = 24.0,
+        reason: str = "scheduled_service",
+    ) -> None:
+        """Register a scheduled maintenance window."""
+        windows = self._scheduled_windows.setdefault(machine_id, [])
+        windows.append(
+            {
+                "start_date": start_date,
+                "downtime_hours": downtime_hours,
+                "reason": reason,
+            }
+        )
+
+    def is_in_maintenance(
+        self,
+        machine_id: str,
+        as_of_date: str | date | datetime | None = None,
+        hi_result: HealthIndexResult | None = None,
+        log_path: str | Path | None = None,
+    ) -> bool:
+        """Check whether machine is flagged for service or under maintenance."""
+        # 1. Manual override takes precedence if explicitly set
+        if machine_id in self._manual_status:
+            return self._manual_status[machine_id]
+
+        # 2. Check passed HealthIndexResult or latest recorded HI for machine
+        target_hi = hi_result or self._latest_hi.get(machine_id)
+        if target_hi is not None:
+            if target_hi.risk_tier == "high" or target_hi.health_index < 40.0:
+                return True
+
+        # 3. Check in-memory scheduled maintenance windows
+        check_date_str = ""
+        if isinstance(as_of_date, str):
+            check_date_str = as_of_date[:10]
+        elif isinstance(as_of_date, (datetime, date)):
+            check_date_str = as_of_date.strftime("%Y-%m-%d")
+        else:
+            check_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        for window in self._scheduled_windows.get(machine_id, []):
+            start = window.get("start_date", "")
+            if start == check_date_str:
+                return True
+            hours = float(window.get("downtime_hours", 24.0))
+            if hours > 24:
+                try:
+                    s_dt = date.fromisoformat(start)
+                    c_dt = date.fromisoformat(check_date_str)
+                    days_span = int(hours // 24)
+                    if 0 <= (c_dt - s_dt).days <= days_span:
+                        return True
+                except (ValueError, TypeError):
+                    pass
+
+        # 4. Check persistent maintenance log file (MaintenanceLogger)
+        try:
+            m_logger = MaintenanceLogger(log_path=log_path)
+            events = m_logger.read_all()
+            for evt in events:
+                if evt.machine_id == machine_id:
+                    if evt.event_date == check_date_str:
+                        return True
+                    if evt.downtime_hours and evt.downtime_hours > 24:
+                        try:
+                            s_dt = date.fromisoformat(evt.event_date)
+                            c_dt = date.fromisoformat(check_date_str)
+                            days_span = int(evt.downtime_hours // 24)
+                            if 0 <= (c_dt - s_dt).days <= days_span:
+                                return True
+                        except (ValueError, TypeError):
+                            pass
+        except Exception as e:
+            logger.debug("Could not inspect maintenance log: %s", e)
+
+        return False
+
+    def clear(self) -> None:
+        """Reset all registry state."""
+        self._manual_status.clear()
+        self._latest_hi.clear()
+        self._scheduled_windows.clear()
+
+
+def get_machine_service_status(
+    machine_id: str,
+    as_of_date: str | date | datetime | None = None,
+    hi_result: HealthIndexResult | None = None,
+    log_path: str | Path | None = None,
+) -> bool:
+    """Return True if machine is flagged for service or under active maintenance.
+
+    According to LLD Section 3 line 85 and Section 5 line 101:
+    - Returns True if Health Index is in critical/high-risk tier (risk_tier == 'high' or HI < 40).
+    - Returns True if an active or scheduled maintenance event exists in the maintenance log.
+    - Returns True if an explicit service flag override is set.
+    """
+    return MachineServiceRegistry.get_instance().is_in_maintenance(
+        machine_id=machine_id,
+        as_of_date=as_of_date,
+        hi_result=hi_result,
+        log_path=log_path,
+    )
+
+
+def set_machine_service_status(
+    machine_id: str,
+    in_maintenance: bool = True,
+) -> None:
+    """Manually set or clear a machine's service/maintenance status."""
+    MachineServiceRegistry.get_instance().set_status(machine_id, in_maintenance=in_maintenance)
+
+
+def clear_machine_service_registry() -> None:
+    """Clear all service registry state (for test isolation)."""
+    MachineServiceRegistry.get_instance().clear()
 
 
 __all__ = [
@@ -282,6 +447,11 @@ __all__ = [
     "CoolingMalfunctionEvent",
     "CoolingMalfunctionDetector",
     "DEMO_PRIORS",
+    # Cross-Feature Service Flag (OI-154 / LLD §3, §4, §5)
+    "MachineServiceRegistry",
+    "get_machine_service_status",
+    "set_machine_service_status",
+    "clear_machine_service_registry",
     # Core Re-exports
     "HealthIndexPipeline",
     "BatchResult",

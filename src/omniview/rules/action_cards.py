@@ -342,46 +342,117 @@ def _critical_vibration_fields(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _maintenance_risk_fields(event: dict[str, Any]) -> dict[str, Any]:
-    """Template for PdM maintenance_risk events (HI threshold breach)."""
-    hi_score = event.get("hi_score", 50)
-    equipment = event.get("equipment_name", "Compressor")
-    days_to_failure = event.get("estimated_days_to_failure", 14)
+    """Template for Feature 2 maintenance_risk events (Health Index degraded)."""
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+
+    # Extract HI score (prefer payload, fallback to top-level event or default 50)
+    hi_raw = payload.get("health_index")
+    if hi_raw is None:
+        hi_raw = event.get("hi_score", event.get("health_index", 50))
+    try:
+        hi_score = float(hi_raw)
+    except (ValueError, TypeError):
+        hi_score = 50.0
+
+    # Extract risk tier (prefer payload, fallback to top-level event or infer from score)
+    risk_tier = payload.get("risk_tier") or event.get("risk_tier")
+    if not risk_tier:
+        if hi_score < 50:
+            risk_tier = "high"
+        elif hi_score < 75:
+            risk_tier = "medium"
+        else:
+            risk_tier = "low"
+    risk_tier_str = str(risk_tier).lower()
+
+    # Equipment / Device identifier
+    equipment = (
+        event.get("equipment_name")
+        or event.get("machine_id")
+        or payload.get("machine_id")
+        or event.get("device_id")
+        or "Equipment"
+    )
+    days_to_failure = (
+        event.get("estimated_days_to_failure")
+        or payload.get("estimated_days_to_failure")
+        or 14
+    )
+
+    # Extract primary drifting features
+    features_raw = (
+        payload.get("contributing_features")
+        or event.get("contributing_features")
+        or event.get("drifting_features")
+        or {}
+    )
+
+    drifting_desc_list: list[str] = []
+    if isinstance(features_raw, dict):
+        for feat_name, feat_data in features_raw.items():
+            if isinstance(feat_data, dict):
+                slope = feat_data.get("slope_7d")
+                z = feat_data.get("z_score")
+                if slope is not None and z is not None:
+                    drifting_desc_list.append(f"{feat_name} (7-day slope: {slope:+.4f}, z={z:+.2f})")
+                elif slope is not None:
+                    drifting_desc_list.append(f"{feat_name} (7-day slope: {slope:+.4f})")
+                else:
+                    drifting_desc_list.append(str(feat_name))
+            else:
+                drifting_desc_list.append(f"{feat_name}: {feat_data}")
+    elif isinstance(features_raw, list):
+        for f in features_raw:
+            if isinstance(f, dict):
+                sig = f.get("signal") or f.get("feature", "feature")
+                slope = f.get("slope_7d") or f.get("slope")
+                if slope is not None:
+                    drifting_desc_list.append(f"{sig} (7-day slope: {slope:+.4f})")
+                else:
+                    drifting_desc_list.append(str(sig))
+            else:
+                drifting_desc_list.append(str(f))
+
+    if drifting_desc_list:
+        drift_str = "; ".join(drifting_desc_list[:3])
+    else:
+        drift_str = "7-day vibration slope"
+
+    # Severity: default to WARNING; CRITICAL if explicitly set to critical
+    event_sev = event.get("severity") or payload.get("severity")
+    if event_sev and str(event_sev).upper() == "CRITICAL":
+        severity = "CRITICAL"
+    else:
+        severity = "WARNING"
 
     return {
-        "severity": "WARNING",
-        "title": f"🔧 Maintenance Risk — {equipment} Health Index Declining",
+        "severity": severity,
+        "title": "🛠️ Maintenance Risk — Equipment Health Index Degraded",
         "summary": (
-            f"{equipment} Health Index has dropped to {hi_score}/100. "
-            f"Trend analysis suggests potential failure within "
-            f"~{days_to_failure} days if current degradation continues. "
-            f"Preventive action now avoids unplanned downtime."
+            f"{equipment} Health Index score has degraded to {hi_score:.0f}/100 "
+            f"in the {risk_tier_str} risk tier. Primary drifting features: {drift_str}. "
+            f"Preventive inspection now avoids accelerated mechanical wear and unplanned downtime."
         ),
         "recommended_action": (
-            f"Schedule preventive maintenance for {equipment} within "
-            f"the next {max(3, days_to_failure - 3)} working days. "
-            f"Priority checks: bearing condition (vibration analysis), "
-            f"lubrication levels, belt tension, and electrical connections. "
-            f"Create CMMS work order with 'predictive' tag."
+            "Schedule bearing lubrication and shaft alignment check at shift end. "
+            "Verify mechanical couplings and motor electrical connections. "
+            "Log findings in CMMS work order."
         ),
         "do_not": (
-            "Do NOT ignore this alert and wait for breakdown — "
-            "unplanned downtime costs 3–5× more than scheduled "
-            "maintenance (parts expediting, overtime, production loss)."
+            "Do NOT trigger emergency stop mid-cycle unless vibration exceeds ISO Zone D trip threshold "
+            "— allow controlled cycle finish to prevent mechanical shock and preform spoilage."
         ),
         "rupee_impact": (
-            f"Preventive maintenance: ₹5,000–15,000 | "
-            f"Unplanned breakdown: ₹50,000–1,50,000 (estimated)"
+            "Preventive maintenance: ₹5,000–₹15,000 | "
+            "Unplanned breakdown: ₹50,000–₹1,50,000 (estimated)"
         ),
-        "urgency_window": f"Schedule within {max(3, days_to_failure - 3)} working days",
+        "urgency_window": f"Schedule inspection within {max(1, int(days_to_failure) - 3)} working days",
         "target_role": "maintenance_engineer",
         "physical_rationale": (
-            f"The Health Index is a composite score derived from vibration "
-            f"trends (ISO 10816-3 zone progression), temperature drift, and "
-            f"current signature analysis. An HI of {hi_score}/100 indicates "
-            f"the equipment is in early-stage degradation — still operational "
-            f"but trending toward failure. Acting now keeps the repair in the "
-            f"'planned' category where parts, labor, and timing can be "
-            f"optimized."
+            f"The Equipment Health Index ({hi_score:.0f}/100, {risk_tier_str} risk tier) is calculated "
+            f"from 7-day feature slopes compared against baseline statistical priors. "
+            f"Acting on early drift signals ({drift_str}) enables scheduled servicing before "
+            f"accelerated mechanical wear triggers catastrophic failure or unplanned downtime."
         ),
     }
 
@@ -690,12 +761,16 @@ def _predictive_maintenance_fields(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _cooling_malfunction_fields(event: dict[str, Any]) -> dict[str, Any]:
-    """Template for cooling_malfunction events (high electrical energy + low cooling temp)."""
+    """Template for Feature 2 cooling_malfunction events (thermal/energy mismatch)."""
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+
     power_kw = float(
         event.get("active_power_kw")
         or event.get("kw")
         or event.get("power_kw")
         or event.get("active_energy_kwh")
+        or payload.get("active_power_kw")
+        or payload.get("kw")
         or 65.0
     )
     temp_c = float(
@@ -703,25 +778,33 @@ def _cooling_malfunction_fields(event: dict[str, Any]) -> dict[str, Any]:
         or event.get("barrel_temp_c")
         or event.get("zone_temp_c")
         or event.get("temp_c")
+        or payload.get("cooling_temp_c")
+        or payload.get("barrel_temp_c")
         or 45.0
     )
-    device_id = str(event.get("device_id") or "ISBM-01")
+    device_id = str(
+        event.get("device_id")
+        or event.get("machine_id")
+        or payload.get("machine_id")
+        or "ISBM-01"
+    )
 
     return {
         "severity": "WARNING",
-        "title": "🧊 Cooling Malfunction — High Energy Draw with Low Barrel Temperature",
+        "title": "❄️ Cooling Malfunction — Thermal/Energy Mismatch Detected",
         "summary": (
-            f"Machine {device_id} is drawing high electrical power ({power_kw:.1f} kW) "
-            f"while cooling/barrel temperature is anomalously low ({temp_c:.1f} °C). "
-            f"This divergence indicates possible cooling valve stuck open, heater burnout, "
+            f"Machine {device_id} is performing active electrical work ({power_kw:.1f} kW) "
+            f"alongside a cold coolant/barrel stream ({temp_c:.1f} °C). "
+            f"This thermal/energy mismatch indicates possible cooling valve stuck open, heater burnout, "
             f"or temperature sensor malfunction."
         ),
         "recommended_action": (
-            "Service or inspect the cooling circuit, barrel heaters, and RTD temperature "
-            "sensors during the next maintenance window or shift transition."
+            "Inspect chiller circulation pump, inlet valves, and temperature probe wiring. "
+            "Service or inspect the cooling circuit and barrel heaters during the next maintenance window."
         ),
         "do_not": (
-            "Do NOT stop the machine — this is a service/inspection advisory for thermal "
+            "Do NOT restart machine under load until coolant circulation is verified. "
+            "Do NOT stop the machine mid-cycle — this is a service/inspection advisory for thermal "
             "efficiency, not an immediate safety trip."
         ),
         "rupee_impact": (

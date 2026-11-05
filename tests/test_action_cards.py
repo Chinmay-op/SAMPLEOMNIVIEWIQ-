@@ -471,3 +471,189 @@ class TestTemplateCoverage:
             result = fn({"device_id": "test", "kva": 400})
             for key in required:
                 assert key in result, f"Template {name} missing field {key}"
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# OI-153: Action Card Templates for Feature 2 Events
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class TestFeature2ActionCardTemplates:
+    """Acceptance criteria tests for OI-153 Feature 2 Action Cards."""
+
+    def setup_method(self):
+        self.gen = ActionCardGenerator()
+
+    def test_maintenance_risk_card_required_fields_and_no_actuation(self):
+        """Verify maintenance_risk card matches OI-153 AC and contains no actuation commands."""
+        event = {
+            "event_type": "maintenance_risk",
+            "device_id": "pune-comp-vib01",
+            "timestamp": "2026-08-20T10:00:00+05:30",
+            "payload": {
+                "health_index": 42.5,
+                "risk_tier": "high",
+                "contributing_features": {
+                    "z_rms_velocity_mm_sec": {
+                        "slope_7d": 0.0821,
+                        "z_score": 2.45,
+                        "direction": "up",
+                    }
+                },
+            },
+        }
+
+        card = self.gen.generate_card(event)
+
+        # 1. Exact Title per OI-153 AC
+        assert card.title == "🛠️ Maintenance Risk — Equipment Health Index Degraded"
+
+        # 2. Summary reports HI score, risk tier, and primary drifting feature
+        assert "42" in card.summary or "43" in card.summary
+        assert "high" in card.summary.lower()
+        assert "z_rms_velocity_mm_sec" in card.summary or "7-day slope" in card.summary
+
+        # 3. Recommended Action matches inspection task
+        assert "Schedule bearing lubrication and shaft alignment check at shift end" in card.recommended_action
+
+        # 4. Do Not contains safety guardrail against mid-cycle emergency stop
+        assert "Do NOT trigger emergency stop mid-cycle unless vibration exceeds ISO Zone D trip threshold" in card.do_not
+
+        # 5. Role and Severity
+        assert card.target_role == "maintenance_engineer"
+        assert card.severity in ("WARNING", "CRITICAL")
+
+        # 6. Verify all required card fields are populated
+        required_fields = [
+            "card_id", "timestamp", "event_type", "severity", "title",
+            "summary", "recommended_action", "do_not", "rupee_impact",
+            "urgency_window", "target_role", "device_id",
+        ]
+        for field in required_fields:
+            val = getattr(card, field)
+            assert val is not None and str(val).strip() != "", f"Field {field} is empty or None"
+
+        # 7. Strictly HITL / advisory: verify NO automated actuation commands
+        forbidden_actuations = [
+            "trip breaker",
+            "open breaker",
+            "remote trip",
+            "emergency stop immediately",
+            "scada override",
+            "automated shutdown",
+        ]
+        for phrase in forbidden_actuations:
+            assert phrase not in card.recommended_action.lower(), f"Actuation command found: {phrase}"
+
+    def test_cooling_malfunction_card_required_fields_and_no_actuation(self):
+        """Verify cooling_malfunction card matches OI-153 AC and contains no actuation commands."""
+        event = {
+            "event_type": "cooling_malfunction",
+            "device_id": "pune-isbm-01",
+            "active_power_kw": 68.4,
+            "cooling_temp_c": 36.5,
+            "timestamp": "2026-08-20T11:30:00+05:30",
+        }
+
+        card = self.gen.generate_card(event)
+
+        # 1. Exact Title per OI-153 AC
+        assert card.title == "❄️ Cooling Malfunction — Thermal/Energy Mismatch Detected"
+
+        # 2. Summary explains active electrical work alongside cold coolant/barrel stream
+        assert "active electrical work" in card.summary.lower()
+        assert "cold coolant/barrel stream" in card.summary.lower()
+        assert "68.4" in card.summary
+        assert "36.5" in card.summary
+
+        # 3. Recommended Action per OI-153 AC
+        assert "Inspect chiller circulation pump, inlet valves, and temperature probe wiring." in card.recommended_action
+
+        # 4. Do Not per OI-153 AC
+        assert "Do NOT restart machine under load until coolant circulation is verified." in card.do_not
+        assert "do not stop the machine" in card.do_not.lower()
+
+        # 5. Role and Severity
+        assert card.target_role == "maintenance_engineer"
+        assert card.severity == "WARNING"
+
+        # 6. Verify all required card fields are populated
+        required_fields = [
+            "card_id", "timestamp", "event_type", "severity", "title",
+            "summary", "recommended_action", "do_not", "rupee_impact",
+            "urgency_window", "target_role", "device_id",
+        ]
+        for field in required_fields:
+            val = getattr(card, field)
+            assert val is not None and str(val).strip() != "", f"Field {field} is empty or None"
+
+        # 7. Strictly HITL / advisory: verify NO automated actuation commands
+        forbidden_actuations = [
+            "trip breaker",
+            "open breaker",
+            "remote trip",
+            "emergency stop",
+            "scada override",
+            "automated shutdown",
+        ]
+        for phrase in forbidden_actuations:
+            assert phrase not in card.recommended_action.lower(), f"Actuation command found: {phrase}"
+
+    def test_maintenance_risk_from_layer3_build_event(self):
+        """Integration with build_maintenance_risk_event produces compliant action card."""
+        from omniview.rules.predictive_maintenance import (
+            ContributingFeature,
+            HealthIndexResult,
+            build_maintenance_risk_event,
+        )
+
+        hi_res = HealthIndexResult(
+            machine_id="compressor-01",
+            health_index=38.0,
+            risk_tier="high",
+            confidence_stage="calibrated",
+            avg_z=2.8,
+            signal_count=5,
+            gap_flagged=False,
+            contributing_features=[
+                ContributingFeature(
+                    signal="vibration_rms_velocity",
+                    slope_value=0.0821,
+                    z_score=2.85,
+                    direction="up",
+                    prior_mean=0.01,
+                    prior_std=0.025,
+                )
+            ],
+            date="2026-08-20",
+        )
+
+        layer3_event = build_maintenance_risk_event(hi_res, device_id="pune-comp-01")
+        card = self.gen.generate_card(layer3_event)
+
+        assert card.title == "🛠️ Maintenance Risk — Equipment Health Index Degraded"
+        assert "38" in card.summary
+        assert "high" in card.summary.lower()
+        assert "vibration_rms_velocity" in card.summary
+        assert "Schedule bearing lubrication and shaft alignment check at shift end" in card.recommended_action
+        assert "Do NOT trigger emergency stop mid-cycle unless vibration exceeds ISO Zone D trip threshold" in card.do_not
+        assert "open breaker" not in card.recommended_action.lower()
+
+    def test_cooling_malfunction_from_rule_evaluator(self):
+        """Integration with evaluate_cooling_malfunction produces compliant action card."""
+        from omniview.rules.cooling_malfunction import evaluate_cooling_malfunction
+
+        event = evaluate_cooling_malfunction(
+            first=72.0,
+            second=35.0,
+            device_id="ISBM-01",
+        )
+        assert event is not None
+
+        card = self.gen.generate_card(event.to_dict())
+        assert card.title == "❄️ Cooling Malfunction — Thermal/Energy Mismatch Detected"
+        assert "72.0" in card.summary
+        assert "35.0" in card.summary
+        assert "Inspect chiller circulation pump, inlet valves, and temperature probe wiring." in card.recommended_action
+        assert "Do NOT restart machine under load until coolant circulation is verified." in card.do_not
+        assert "trip breaker" not in card.recommended_action.lower()

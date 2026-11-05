@@ -32,6 +32,7 @@ from omniview.config import (
     LAZY_IDLE_RULE_CURRENT_A,
     LAZY_IDLE_RULE_TEMP_C,
 )
+from omniview.rules.predictive_maintenance import get_machine_service_status
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +87,12 @@ class LazyIdleDetector:
         temp_threshold_c: float = LAZY_IDLE_RULE_TEMP_C,
         current_threshold_a: float = LAZY_IDLE_RULE_CURRENT_A,
         duration_min: int = LAZY_IDLE_DURATION_MIN,
+        check_maintenance: bool = True,
     ) -> None:
         self._temp_threshold = temp_threshold_c
         self._current_threshold = current_threshold_a
         self._duration_min = duration_min
+        self._check_maintenance = check_maintenance
 
         # device_id → {condition_since: float|None, last_seen: float, alerted: bool}
         self._state: dict[str, dict[str, Any]] = {}
@@ -108,12 +111,12 @@ class LazyIdleDetector:
         -------
         LazyIdleEvent | None
         """
-        device_id = sample.get("device_id", "unknown")
+        device_id = str(sample.get("device_id", "unknown"))
         ts = self._parse_timestamp(sample)
         now_epoch = ts.timestamp()
         data = sample.get("data", sample)
 
-        # Extract fields (accept both adapted and raw names)
+        # Check condition: hot AND idle
         temp = self._get_float(data, "zone_temp_c", "present_value_pv_c")
         current = self._get_float(data, "current_a", "current_a_avg")
 
@@ -125,6 +128,12 @@ class LazyIdleDetector:
         if state is None:
             state = {"condition_since": None, "last_seen": now_epoch, "alerted": False}
             self._state[device_id] = state
+
+        # Check if machine is under service/maintenance (OI-154 / LLD §5 line 101)
+        if self._check_maintenance and get_machine_service_status(device_id):
+            state["condition_since"] = None
+            state["alerted"] = False
+            return None
 
         # Stale-stream reset (>5 min gap)
         if (now_epoch - state["last_seen"]) > 300:
@@ -208,3 +217,116 @@ class LazyIdleDetector:
         if isinstance(ts_raw, (int, float)):
             return datetime.fromtimestamp(ts_raw, tz=timezone.utc)
         return datetime.now(timezone.utc)
+
+
+def evaluate_lazy_idle(
+    sample: dict[str, Any],
+    temp_threshold_c: float = LAZY_IDLE_RULE_TEMP_C,
+    current_threshold_a: float = LAZY_IDLE_RULE_CURRENT_A,
+    duration_min: int = LAZY_IDLE_DURATION_MIN,
+    check_maintenance: bool = True,
+    detector: LazyIdleDetector | None = None,
+) -> LazyIdleEvent | None:
+    """Evaluate lazy-idle waste directly on a sample or reading.
+
+    Adheres to LLD Section 5 Table 5:
+    'Lazy-idle waste | evaluate_lazy_idle in lazy_idle.py'
+
+    Suppresses alerts when the target machine is under service/maintenance
+    per LLD Section 5 line 101 ('Health | feature 2 service flag').
+
+    Parameters
+    ----------
+    sample : dict[str, Any]
+        Reading payload containing device_id, temperature, and electrical current.
+    temp_threshold_c : float
+        Zone temperature threshold (°C).
+    current_threshold_a : float
+        Current threshold below which machine is considered idle (A).
+    duration_min : int
+        Required sustained duration in minutes.
+    check_maintenance : bool, default True
+        Whether to check and suppress alerts if machine is in maintenance.
+    detector : LazyIdleDetector, optional
+        Optional stateful detector instance for tracking temporal durations.
+    """
+    device_id = str(sample.get("device_id", "unknown"))
+
+    # Suppress if machine is flagged for service/maintenance (OI-154 / LLD §5 line 101)
+    if check_maintenance and get_machine_service_status(device_id):
+        return None
+
+    if detector is not None:
+        return detector.evaluate(sample)
+
+    data = sample.get("data", sample)
+    temp: float | None = None
+    current: float | None = None
+
+    for k in ("zone_temp_c", "present_value_pv_c", "temp_c", "temperature_c"):
+        if k in data and data[k] is not None:
+            try:
+                temp = float(data[k])
+                break
+            except (ValueError, TypeError):
+                pass
+
+    for k in ("current_a", "current_a_avg", "current"):
+        if k in data and data[k] is not None:
+            try:
+                current = float(data[k])
+                break
+            except (ValueError, TypeError):
+                pass
+
+    if temp is None or current is None:
+        return None
+
+    is_hot = temp > temp_threshold_c
+    is_idle = current < current_threshold_a
+    if not (is_hot and is_idle):
+        return None
+
+    sample_dur = data.get("duration_min")
+    if sample_dur is not None:
+        try:
+            dur_val = float(sample_dur)
+            if dur_val < duration_min:
+                return None
+        except (ValueError, TypeError):
+            dur_val = float(duration_min)
+    else:
+        dur_val = float(duration_min)
+
+    ts_raw = sample.get("timestamp")
+    if isinstance(ts_raw, datetime):
+        ts = ts_raw
+    elif isinstance(ts_raw, str):
+        try:
+            ts = datetime.fromisoformat(ts_raw)
+        except (ValueError, TypeError):
+            ts = datetime.now(timezone.utc)
+    else:
+        ts = datetime.now(timezone.utc)
+
+    return LazyIdleEvent(
+        device_id=device_id,
+        timestamp=ts,
+        zone_temp_c=round(temp, 1),
+        current_a=round(current, 3),
+        duration_min=round(dur_val, 1),
+        synthetic=bool(sample.get("synthetic", True)),
+        threshold_refs={
+            "temp_threshold_c": temp_threshold_c,
+            "current_threshold_a": current_threshold_a,
+            "duration_min": duration_min,
+            "note": "PLACEHOLDER — pending OI-79 site calibration",
+        },
+    )
+
+
+__all__ = [
+    "LazyIdleEvent",
+    "LazyIdleDetector",
+    "evaluate_lazy_idle",
+]

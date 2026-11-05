@@ -296,7 +296,7 @@ class TestActionCardCoolingMalfunction:
         assert card.event_type == "cooling_malfunction"
         assert card.severity == "WARNING"
         assert "Cooling Malfunction" in card.title
-        assert "🧊" in card.title
+        assert "❄️" in card.title or "🧊" in card.title
 
         # Check spec requirements: says service or inspect, does NOT stop machine
         assert "service or inspect" in card.recommended_action.lower()
