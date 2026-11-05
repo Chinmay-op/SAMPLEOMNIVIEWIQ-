@@ -42,3 +42,9 @@ synthetic_data/output/*.csv
 # ── OS ───────────────────────────────────────────────────────────────────
 Thumbs.db
 .DS_Store
+
+
+# ── Local Runtime Artifacts ──────────────────────────────────────────────
+*.log
+.running_pids.json
+.edge_state.json

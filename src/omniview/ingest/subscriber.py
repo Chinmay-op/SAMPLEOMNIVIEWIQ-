@@ -206,8 +206,9 @@ def run_subscriber(site_id: str | None = None) -> None:
         logger.info("Received signal %d — shutting down", signum)
         stop_event.set()
 
-    signal.signal(signal.SIGINT, _signal_handler)
-    signal.signal(signal.SIGTERM, _signal_handler)
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
 
     with OmniViewMQTTClient() as client:
         client.subscribe(wildcard, _on_sensor_message)
