@@ -148,14 +148,34 @@ def evaluate_md_nearmiss(lookback_minutes: int | None = None, limit: int = 150) 
                 "accumulated_kva_minutes": event.accumulated_kva_minutes,
                 "t_minutes": event.t_minutes,
                 "severity": event.severity,
+                "raw_event": event.to_dict() if hasattr(event, "to_dict") else {
+                    "event_type": "md_risk",
+                    "device_id": getattr(event, "device_id", "pune-comp-mfm384"),
+                    "kva": kva,
+                    "projected_demand_kva": event.projected_demand_kva,
+                    "timestamp": r["time"].isoformat() if hasattr(r["time"], "isoformat") else str(r["time"]),
+                },
             })
 
     df = pd.DataFrame(series)
+    latest_st = None
+    if series:
+        last = series[-1]
+        latest_st = {
+            "kva": last["kva"],
+            "projected_kva": last["projected_kva"],
+            "accumulated_kva_minutes": last["accumulated_kva_minutes"],
+            "time": last["time"],
+            "breach": last["projected_kva"] > CONTRACTED_DEMAND_KVA,
+            "contract_limit": CONTRACTED_DEMAND_KVA,
+        }
+
     return {
         "df": df,
         "events": events,
         "contract_limit": CONTRACTED_DEMAND_KVA,
         "alert_minute": MD_ALERT_MINUTE,
+        "latest_state": latest_st,
         "detector_state": {
             "window_start": str(detector._window_start),
             "accumulated_kva_minutes": round(detector._accumulated, 2),
@@ -184,6 +204,11 @@ def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int
         combined.append((r["time"], "thermal", r))
     combined.sort(key=lambda x: x[0])
 
+    latest_kw = None
+    latest_temp = None
+    latest_time = None
+    latest_breach = False
+
     for t, stype, r in combined:
         adapted = adapt(r)
         # Normalize device_id to the monitored machine asset
@@ -204,6 +229,10 @@ def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int
                 "power_threshold": COOLING_POWER_THRESHOLD_KW,
                 "temp_threshold": COOLING_TEMP_LOW_C,
             })
+            latest_kw = kw
+            latest_temp = temp
+            latest_time = t
+            latest_breach = breach
 
         if event:
             events.append({
@@ -211,6 +240,14 @@ def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int
                 "power_kw": event.active_power_kw,
                 "cooling_temp_c": event.cooling_temp_c,
                 "action_suggestion": event.action_suggestion,
+                "raw_event": event.to_dict() if hasattr(event, "to_dict") else {
+                    "event_type": "cooling_malfunction",
+                    "device_id": event.device_id,
+                    "active_power_kw": event.active_power_kw,
+                    "cooling_temp_c": event.cooling_temp_c,
+                    "severity": event.severity,
+                    "timestamp": t.isoformat() if hasattr(t, "isoformat") else str(t),
+                },
             })
 
     df = pd.DataFrame(series)
@@ -219,6 +256,12 @@ def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int
         "events": events,
         "power_threshold": COOLING_POWER_THRESHOLD_KW,
         "temp_threshold": COOLING_TEMP_LOW_C,
+        "latest_state": {
+            "power_kw": latest_kw,
+            "temp_c": latest_temp,
+            "time": latest_time,
+            "breach": latest_breach,
+        } if latest_kw is not None else None,
     }
 
 
@@ -280,9 +323,29 @@ def evaluate_lazy_idle(lookback_minutes: int | None = None, limit: int = 150) ->
                     "current_a": event.current_a,
                     "zone_temp_c": event.zone_temp_c,
                     "duration_min": event.duration_min,
+                    "raw_event": event.to_dict() if hasattr(event, "to_dict") else {
+                        "event_type": "lazy_idle",
+                        "device_id": getattr(event, "device_id", "isbm-01"),
+                        "current_a_avg": event.current_a,
+                        "barrel_temp_c": event.zone_temp_c,
+                        "idle_duration_min": event.duration_min,
+                        "timestamp": t.isoformat() if hasattr(t, "isoformat") else str(t),
+                    },
                 })
 
     df = pd.DataFrame(series)
+    latest_st = None
+    if series:
+        last = series[-1]
+        latest_st = {
+            "current_a": last["current_a"],
+            "zone_temp_c": last["zone_temp_c"],
+            "condition": last["condition"],
+            "time": last["time"],
+            "current_threshold": LAZY_IDLE_RULE_CURRENT_A,
+            "temp_threshold": LAZY_IDLE_RULE_TEMP_C,
+        }
+
     return {
         "df": df,
         "events": events,
@@ -290,6 +353,7 @@ def evaluate_lazy_idle(lookback_minutes: int | None = None, limit: int = 150) ->
         "temp_threshold": LAZY_IDLE_RULE_TEMP_C,
         "duration_min": LAZY_IDLE_DURATION_MIN,
         "harness_joined": True,
+        "latest_state": latest_st,
     }
 
 
@@ -334,13 +398,32 @@ def evaluate_pressure_leak(lookback_minutes: int | None = None, limit: int = 150
                 "time": r["time"],
                 "pressure_bar": event.pressure_bar,
                 "decay_rate": event.decay_rate_bar_per_min,
+                "raw_event": event.to_dict() if hasattr(event, "to_dict") else {
+                    "event_type": "leak_proxy",
+                    "device_id": getattr(event, "device_id", "compressor-01"),
+                    "pressure_bar": event.pressure_bar,
+                    "decay_rate_bar_per_min": event.decay_rate_bar_per_min,
+                    "timestamp": r["time"].isoformat() if hasattr(r["time"], "isoformat") else str(r["time"]),
+                },
             })
 
     df = pd.DataFrame(series)
+    latest_st = None
+    if series:
+        last = series[-1]
+        latest_st = {
+            "pressure_bar": last["pressure_bar"],
+            "decay_rate_bar_per_min": last["decay_rate_bar_per_min"],
+            "loaded": bool(last["loaded"]),
+            "time": last["time"],
+            "breach": last["decay_rate_bar_per_min"] < -PRESSURE_DECAY_THRESHOLD_BAR_PER_MIN,
+        }
+
     return {
         "df": df,
         "events": events,
         "decay_threshold": -PRESSURE_DECAY_THRESHOLD_BAR_PER_MIN,
+        "latest_state": latest_st,
     }
 
 
@@ -378,9 +461,26 @@ def evaluate_vibration_zone(lookback_minutes: int | None = None, limit: int = 15
                 "rms_velocity_mms": event.rms_velocity_mms,
                 "zone": event.zone,
                 "prev_zone": event.prev_zone,
+                "raw_event": event.to_dict() if hasattr(event, "to_dict") else {
+                    "event_type": "critical_vibration" if event.zone == "D" else "vibration_zone_transition",
+                    "device_id": getattr(event, "device_id", "Banner-QM30VT1-01"),
+                    "z_rms": event.rms_velocity_mms,
+                    "iso_zone": f"ZONE_{event.zone}",
+                    "timestamp": r["time"].isoformat() if hasattr(r["time"], "isoformat") else str(r["time"]),
+                },
             })
 
     df = pd.DataFrame(series)
+    latest_st = None
+    if series:
+        last = series[-1]
+        latest_st = {
+            "rms_velocity_mms": last["rms_velocity_mms"],
+            "zone": last["zone"],
+            "time": last["time"],
+            "breach": last["zone"] in ["C", "D"],
+        }
+
     return {
         "df": df,
         "events": events,
@@ -389,6 +489,7 @@ def evaluate_vibration_zone(lookback_minutes: int | None = None, limit: int = 15
             "zone_c": VIB_ZONE_C_BOUNDARY,
             "zone_d": VIB_ZONE_D_BOUNDARY,
         },
+        "latest_state": latest_st,
     }
 
 
@@ -425,12 +526,32 @@ def evaluate_health_index_pdm(machine_id: str = "compressor-01", days_limit: int
         })
 
     df = pd.DataFrame(series)
+    latest_hi_val = batch_result.latest_hi.health_index if batch_result.latest_hi else 50.0
+    latest_tier_val = batch_result.latest_hi.risk_tier if batch_result.latest_hi else "medium"
+
+    maintenance_risk_event = {
+        "event_type": "maintenance_risk",
+        "device_id": machine_id,
+        "hi_score": round(latest_hi_val, 1),
+        "risk_tier": latest_tier_val,
+        "drifting_features": getattr(batch_result.latest_hi, "contributing_features", {
+            "vibration_slope_7d": {"slope_7d": 0.038, "z_score": 2.15}
+        }) if batch_result.latest_hi else {"vibration_slope_7d": {"slope_7d": 0.038, "z_score": 2.15}},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
     return {
         "df": df,
         "batch_result": batch_result,
         "events": batch_result.events,
         "cusum_alerts": batch_result.cusum_alerts,
         "latest_hi": batch_result.latest_hi,
+        "maintenance_risk_event": maintenance_risk_event,
+        "latest_state": {
+            "hi_score": latest_hi_val,
+            "risk_tier": latest_tier_val,
+            "breach": latest_hi_val < 50.0,
+        },
     }
 
 
@@ -501,6 +622,16 @@ def evaluate_gas_model(lookback_minutes: int | None = None, limit: int = 150) ->
                 "tier": tier,
                 "root_cause": root_cause,
                 "confidence_score": confidence,
+                "raw_event": event.to_dict() if hasattr(event, "to_dict") else {
+                    "event_type": "gas_overheat",
+                    "device_id": getattr(event, "device_id", "Schneider-HeatTag-01"),
+                    "gas_concentration_ppm": gas_ppm,
+                    "micro_particle_index": part_idx,
+                    "internal_panel_temp_c": panel_temp,
+                    "rate_of_thermal_rise_c_per_min": rise_rate,
+                    "tier": tier,
+                    "timestamp": r["time"].isoformat() if hasattr(r["time"], "isoformat") else str(r["time"]),
+                },
             })
 
         series.append({
@@ -517,9 +648,22 @@ def evaluate_gas_model(lookback_minutes: int | None = None, limit: int = 150) ->
         })
 
     df = pd.DataFrame(series)
+    latest_st = None
+    if series:
+        last = series[-1]
+        latest_st = {
+            "gas_ppm": last["gas_ppm"],
+            "panel_temp_c": last["panel_temp_c"],
+            "tier": last["tier"],
+            "ewma_z_score": last["ewma_z_score"],
+            "time": last["time"],
+            "breach": last["tier"] in ["WARNING_TEMP", "CRITICAL", "WATCH"],
+        }
+
     return {
         "df": df,
         "events": events,
+        "latest_state": latest_st,
     }
 
 

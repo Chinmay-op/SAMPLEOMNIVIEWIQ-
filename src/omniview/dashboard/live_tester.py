@@ -49,9 +49,15 @@ from omniview.dashboard.status_inspector import evaluate_all_functions
 from omniview.edge.bots.runner import get_live_bots_manager
 from omniview.edge.ntp_guard import check_drift
 from omniview.ingest.db import get_engine
+from omniview.rules.action_cards import ActionCardGenerator
+from omniview.dashboard.action_card_ui import render_action_card
+from omniview.rules.cooling_malfunction import evaluate_cooling_malfunction as eval_cooling_pure
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+
+# Initialize singleton generator
+card_generator = ActionCardGenerator()
 
 # ── Page Configuration ────────────────────────────────────────────────────────
 st.set_page_config(
@@ -233,12 +239,25 @@ except Exception as e:
 st.markdown("### 🔍 1. Implementation Status Summary")
 statuses = evaluate_all_functions(lookback_minutes=chosen_lookback or 60)
 
+OUTPUT_CARD_LOOKUP = {
+    "MD Near-Miss": "⚡ MD Near-Miss Action Card",
+    "Cooling Malfunction": "❄️ Cooling Malfunction Action Card",
+    "Lazy-Idle": "🔥 Lazy Idle Action Card",
+    "Pressure Leak Proxy": "💨 Pressure Decay Action Card",
+    "Vibration Zones (ISO 10816-3)": "🔴 Critical Vibration Action Card",
+    "Health Index & CUSUM": "🛠️ Maintenance Risk Action Card",
+    "Machine Service Status Registry": "📋 Machine Service Registry State",
+    "Panel Overheat Precursor": "🔥 Switchboard Fire Precursor Card",
+    "Ambient Chiller OLS": "📊 OLS Thermal Baseline Residual",
+}
+
 status_rows = []
 for s in statuses:
     status_rows.append({
         "Function": s.name,
         "File": s.code_file,
         "Status": s.status,
+        "Output Produced": OUTPUT_CARD_LOOKUP.get(s.name, "Layer 3/4 Artifact"),
         "Reason": s.reason,
         "Latest Telemetry (UTC)": s.last_event_time,
     })
@@ -263,6 +282,65 @@ def render_status_badge(status_str: str) -> str:
 
 
 status_lookup = {s.name: s for s in statuses}
+
+
+def render_output_pipeline(
+    panel_key: str,
+    event_type: str,
+    events: list[dict[str, Any]],
+    latest_state: dict[str, Any] | None,
+    default_preview_event: dict[str, Any],
+    state_descriptions: list[str] | None = None,
+    interactive_tester_func: Any = None,
+) -> None:
+    """Render the Layer 3 Event Envelope and Layer 4 Operator Action Card output section."""
+    st.markdown("#### 📤 Output Pipeline: Layer 3 Event Envelope & Layer 4 Action Card")
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.markdown("**Latest Telemetry & Detector State:**")
+        if latest_state:
+            is_breach = latest_state.get("breach", False)
+            state_text = "🔴 BREACH (Alarm Triggered)" if is_breach else "🟢 NORMAL (Healthy Operation)"
+            st.metric("Detector State", state_text)
+            if state_descriptions:
+                for desc in state_descriptions:
+                    st.write(f"- {desc}")
+        else:
+            st.info("Awaiting telemetry in lookback window.")
+
+    with c2:
+        st.markdown("**Layer 3 Event Arbitrator Status:**")
+        count = len(events)
+        st.metric("Events Fired in Window", count)
+        if count > 0:
+            st.warning(f"⚠️ {count} breach event(s) emitted to arbitration queue.")
+        else:
+            st.success("✅ 0 events emitted — telemetry within safe operating limits.")
+
+    # 1. Real Fired Events
+    if events:
+        latest_evt = events[-1]
+        raw_event = latest_evt.get("raw_event") or default_preview_event
+        st.markdown("##### 🎯 Emitted Layer 4 Operator Action Card")
+        action_card = card_generator.generate_card(raw_event)
+        render_action_card(action_card)
+        with st.expander("📄 Emitted Layer 3 Event Envelope (Raw JSON)"):
+            st.json(raw_event)
+    else:
+        # 2. Preview of Output Contract
+        with st.expander("📋 View Action Card Output Contract & Template", expanded=False):
+            st.markdown(
+                "When a physical threshold is breached, the Layer 3 detector emits an event envelope which "
+                "the `ActionCardGenerator` transforms into this verified Layer 4 Action Card:"
+            )
+            preview_card = card_generator.generate_card(default_preview_event)
+            render_action_card(preview_card)
+            st.markdown("**Layer 3 Event Envelope Schema:**")
+            st.json(default_preview_event)
+
+    # 3. Interactive Tester if provided
+    if interactive_tester_func is not None:
+        interactive_tester_func()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -313,6 +391,32 @@ if not df1.empty:
 
     apply_dataviz_layout(fig1, "MD Near-Miss: Real-Time kVA & Mid-Window Projections vs 500 kVA Contract", yaxis_title="Apparent Power (kVA)")
     st.plotly_chart(fig1, use_container_width=True)
+
+    # Output Pipeline
+    preview_md_event = {
+        "event_type": "md_nearmiss",
+        "device_id": "pune-comp-mfm384",
+        "kva": 482.0,
+        "projected_kva": 528.0,
+        "contract_limit_kva": 500.0,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    state_descs_1 = []
+    if res1.get("latest_state"):
+        ls1 = res1["latest_state"]
+        state_descs_1 = [
+            f"Active Demand: `{ls1['kva']:.1f} kVA` (Contract Cap: `500.0 kVA`)",
+            f"Projected Window Demand: `{ls1['projected_kva']:.1f} kVA`",
+            f"Window Accumulated: `{ls1['accumulated_kva_minutes']:.1f} kVA-min`",
+        ]
+    render_output_pipeline(
+        panel_key="md_nearmiss",
+        event_type="md_nearmiss",
+        events=res1["events"],
+        latest_state=res1.get("latest_state"),
+        default_preview_event=preview_md_event,
+        state_descriptions=state_descs_1,
+    )
 else:
     st.info("No electrical telemetry found for the selected time window.")
 
@@ -372,6 +476,61 @@ if not df2.empty:
     apply_dataviz_layout(fig2, "Cooling Malfunction: High Power (>50kW) alongside Cold Temp (<100°C)", yaxis_title="Active Power (kW)")
     fig2.update_yaxes(title_text="Temperature (°C)", secondary_y=True, showgrid=False)
     st.plotly_chart(fig2, use_container_width=True)
+
+    # Interactive anomaly tester for Cooling Malfunction
+    def render_cm_interactive_tester():
+        with st.expander("🧪 Test Anomaly Injection / Malfunction Simulator", expanded=True):
+            st.markdown(
+                "Test how `CoolingMalfunctionDetector` and `ActionCardGenerator` react when you simulate a thermal/energy mismatch:"
+            )
+            tc1, tc2 = st.columns(2)
+            with tc1:
+                test_p = st.slider("Simulated Active Power (kW)", min_value=10.0, max_value=120.0, value=68.5, step=1.0, key="cm_test_p")
+            with tc2:
+                test_t = st.slider("Simulated Barrel / Coolant Temp (°C)", min_value=15.0, max_value=260.0, value=42.0, step=1.0, key="cm_test_t")
+
+            sim_evt = eval_cooling_pure(test_p, test_t, device_id="isbm-01")
+            if sim_evt:
+                st.error(f"🚨 **BREACH DETECTED**: Power ({test_p:.1f} kW > 50.0 kW) AND Temp ({test_t:.1f} °C < 100.0 °C)!")
+                evt_dict = sim_evt.to_dict()
+                sim_card = card_generator.generate_card(evt_dict)
+                st.markdown("**Generated Operator Action Card (Layer 4):**")
+                render_action_card(sim_card)
+                with st.expander("📄 Layer 3 Event Envelope (JSON)"):
+                    st.json(evt_dict)
+            else:
+                st.success(f"🟢 **NORMAL**: Power ({test_p:.1f} kW) or Temp ({test_t:.1f} °C) is outside breach condition.")
+
+    preview_cm_event = {
+        "event_type": "cooling_malfunction",
+        "device_id": "isbm-01",
+        "active_power_kw": 68.5,
+        "cooling_temp_c": 42.0,
+        "severity": "warning",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "action_suggestion": "service_or_inspect",
+        "details": {
+            "power_exceeds_by_kw": 18.5,
+            "temp_below_by_c": 58.0,
+            "is_placeholder_threshold": True,
+        }
+    }
+    state_descs_2 = []
+    if res2.get("latest_state"):
+        ls2 = res2["latest_state"]
+        state_descs_2 = [
+            f"Active Electrical Power: `{ls2['power_kw']:.1f} kW` (Threshold: `> 50.0 kW`)",
+            f"Barrel / Cooling Temp: `{ls2['temp_c']:.1f} °C` (Threshold: `< 100.0 °C`)",
+        ]
+    render_output_pipeline(
+        panel_key="cooling_malfunction",
+        event_type="cooling_malfunction",
+        events=res2["events"],
+        latest_state=res2.get("latest_state"),
+        default_preview_event=preview_cm_event,
+        state_descriptions=state_descs_2,
+        interactive_tester_func=render_cm_interactive_tester,
+    )
 else:
     st.info("No paired electrical and thermal telemetry found for the selected time window.")
 
@@ -422,6 +581,32 @@ if not df3.empty:
     apply_dataviz_layout(fig3, "Lazy-Idle: Motor Idle Current (<0.65A) with Elevated Barrel Temp (>25°C)", yaxis_title="Motor Current (A)")
     fig3.update_yaxes(title_text="Temperature (°C)", secondary_y=True, showgrid=False)
     st.plotly_chart(fig3, use_container_width=True)
+
+    # Output Pipeline
+    preview_li_event = {
+        "event_type": "lazy_idle",
+        "device_id": "isbm-01",
+        "current_a_avg": 0.42,
+        "barrel_temp_c": 220.0,
+        "idle_duration_min": 18,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    state_descs_3 = []
+    if res3.get("latest_state"):
+        ls3 = res3["latest_state"]
+        state_descs_3 = [
+            f"Motor Current: `{ls3['current_a']:.2f} A` (Rule limit: `< 0.65 A`)",
+            f"Barrel Zone Temp: `{ls3['zone_temp_c']:.1f} °C` (Heated threshold: `> 25.0 °C`)",
+            f"Idle Condition Met: `{'YES' if ls3['condition'] else 'NO'}`",
+        ]
+    render_output_pipeline(
+        panel_key="lazy_idle",
+        event_type="lazy_idle",
+        events=res3["events"],
+        latest_state=res3.get("latest_state"),
+        default_preview_event=preview_li_event,
+        state_descriptions=state_descs_3,
+    )
 else:
     st.info("No joined current and temperature readings found for the selected time window.")
 
@@ -465,6 +650,31 @@ if not df4.empty:
     apply_dataviz_layout(fig4, "Pressure Leak: Loaded Pressure Discharge & Decay Rate vs -0.15 bar/min", yaxis_title="Pressure (bar)")
     fig4.update_yaxes(title_text="Decay Rate (bar/min)", secondary_y=True, showgrid=False)
     st.plotly_chart(fig4, use_container_width=True)
+
+    # Output Pipeline
+    preview_pl_event = {
+        "event_type": "leak_proxy",
+        "device_id": "compressor-01",
+        "pressure_bar": 4.8,
+        "decay_rate_bar_per_min": -0.28,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    state_descs_4 = []
+    if res4.get("latest_state"):
+        ls4 = res4["latest_state"]
+        state_descs_4 = [
+            f"Discharge Pressure: `{ls4['pressure_bar']:.1f} bar`",
+            f"Pressure Decay Rate: `{ls4['decay_rate_bar_per_min']:.3f} bar/min` (Threshold: `< -0.15 bar/min`)",
+            f"Compressor Loaded: `{'LOADED' if ls4['loaded'] else 'UNLOADED'}`",
+        ]
+    render_output_pipeline(
+        panel_key="pressure_leak",
+        event_type="leak_proxy",
+        events=res4["events"],
+        latest_state=res4.get("latest_state"),
+        default_preview_event=preview_pl_event,
+        state_descriptions=state_descs_4,
+    )
 else:
     st.info("No pressure telemetry found for the selected time window.")
 
@@ -502,6 +712,30 @@ if not df5.empty:
 
     apply_dataviz_layout(fig5, "Vibration Zones: RMS Velocity Classified into ISO 10816-3 Bands", yaxis_title="Velocity RMS (mm/s)")
     st.plotly_chart(fig5, use_container_width=True)
+
+    # Output Pipeline
+    preview_vz_event = {
+        "event_type": "critical_vibration",
+        "device_id": "Banner-QM30VT1-01",
+        "z_rms": 19.8,
+        "iso_zone": "ZONE_D",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    state_descs_5 = []
+    if res5.get("latest_state"):
+        ls5 = res5["latest_state"]
+        state_descs_5 = [
+            f"RMS Velocity: `{ls5['rms_velocity_mms']:.2f} mm/s`",
+            f"Current ISO Zone: `Zone {ls5['zone']}`",
+        ]
+    render_output_pipeline(
+        panel_key="vibration_zone",
+        event_type="critical_vibration",
+        events=res5["events"],
+        latest_state=res5.get("latest_state"),
+        default_preview_event=preview_vz_event,
+        state_descriptions=state_descs_5,
+    )
 else:
     st.info("No vibration telemetry found for the selected time window.")
 
@@ -541,6 +775,31 @@ if not df6.empty:
     apply_dataviz_layout(fig6, "Equipment Health Index (0-100) and Degradation Tiers", xaxis_title="Date", yaxis_title="Score (0–100)")
     fig6.update_yaxes(range=[0, 105])
     st.plotly_chart(fig6, use_container_width=True)
+
+    # Output Pipeline
+    preview_hi_event = res6.get("maintenance_risk_event") or {
+        "event_type": "maintenance_risk",
+        "device_id": "compressor-01",
+        "hi_score": 38.0,
+        "risk_tier": "high",
+        "drifting_features": {"vibration_slope_7d": {"slope_7d": 0.042, "z_score": 2.3}},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    state_descs_6 = []
+    if res6.get("latest_state"):
+        ls6 = res6["latest_state"]
+        state_descs_6 = [
+            f"Equipment Health Index: `{ls6['hi_score']:.1f}/100` (High-risk: `< 40`, Degraded: `< 50`)",
+            f"Assigned Risk Tier: `{str(ls6['risk_tier']).upper()}`",
+        ]
+    render_output_pipeline(
+        panel_key="health_index",
+        event_type="maintenance_risk",
+        events=res6["events"],
+        latest_state=res6.get("latest_state"),
+        default_preview_event=preview_hi_event,
+        state_descriptions=state_descs_6,
+    )
 else:
     st.info("Health Index pipeline requires at least 7 daily aggregated feature rows to compute rolling slopes. (Telemetry accumulating).")
 
@@ -629,6 +888,35 @@ if not df8.empty:
     col_g2.metric("EWMA Z-Score", f"{latest_row['ewma_z_score']:.2f}")
     col_g3.metric("Root Cause", str(latest_row["root_cause"]))
     col_g4.metric("Isolation Forest Score", f"{latest_row['isolation_forest_score']:.2f} (Default prior)")
+
+    # Output Pipeline
+    preview_gas_event = {
+        "event_type": "gas_overheat",
+        "device_id": "Schneider-HeatTag-01",
+        "gas_concentration_ppm": 88.0,
+        "micro_particle_index": 52.0,
+        "internal_panel_temp_c": 95.0,
+        "rate_of_thermal_rise_c_per_min": 2.8,
+        "tier": "CRITICAL",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    state_descs_8 = []
+    if res8.get("latest_state"):
+        ls8 = res8["latest_state"]
+        state_descs_8 = [
+            f"Gas Concentration: `{ls8['gas_ppm']:.1f} ppm`",
+            f"Panel Temperature: `{ls8['panel_temp_c']:.1f} °C`",
+            f"Classification Tier: `{ls8['tier']}`",
+            f"EWMA Z-Score: `{ls8['ewma_z_score']:.2f}`",
+        ]
+    render_output_pipeline(
+        panel_key="gas_overheat",
+        event_type="gas_overheat",
+        events=res8["events"],
+        latest_state=res8.get("latest_state"),
+        default_preview_event=preview_gas_event,
+        state_descriptions=state_descs_8,
+    )
 else:
     st.info("No gas telemetry found for the selected time window.")
 
