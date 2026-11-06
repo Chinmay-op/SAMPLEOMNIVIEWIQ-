@@ -32,29 +32,21 @@ def validate_payload(payload):
         except jsonschema.exceptions.ValidationError as e:
             print(f"Schema Validation Error: {e.message}")
 
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
+
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
+
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
+
 def _read_edge_state() -> dict:
-    state_file = Path(".edge_state.json")
-    if state_file.exists():
-        try:
-            with open(state_file, 'r') as f:
-                return json.load(f)
-        except:
-            pass
-    return {}
+    return get_edge_state()
 
 def _write_edge_state(payload: dict, is_anomaly: bool):
-    state = _read_edge_state()
-    state["thermal_duty_cycle"] = payload["data"].get("manipulated_variable_mv_heat_percent", 0.0)
-    state["thermal_pv"] = payload["data"].get("present_value_pv_c", 25.0)
-    state["heater_failed"] = is_anomaly
-    
-    state_file = Path(".edge_state.json")
-    try:
-        with open(state_file, 'w') as f:
-            json.dump(state, f)
-    except Exception as e:
-        print(f"Failed to write edge state: {e}")
-
+    update_edge_state({
+        "thermal_duty_cycle": payload["data"].get("manipulated_variable_mv_heat_percent", 0.0),
+        "thermal_pv": payload["data"].get("present_value_pv_c", 25.0),
+        "heater_failed": is_anomaly,
+    })
 
 # --- Live Stochastic PID State ---
 current_pv = 25.0  # Cold start from ambient

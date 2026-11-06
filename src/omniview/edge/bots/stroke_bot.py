@@ -33,30 +33,17 @@ def validate_payload(payload):
             print(f"Schema Validation Error: {e.message}")
 
 
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
+
 def _read_edge_state() -> dict:
-    state_file = Path(".edge_state.json")
-    if state_file.exists():
-        try:
-            with open(state_file, 'r') as f:
-                return json.load(f)
-        except:
-            pass
-    return {}
+    return get_edge_state()
 
 def _write_edge_state(payload: dict):
-    state = _read_edge_state()
-    # Is the machine actively producing strokes?
     strokes = payload["data"].get("strokes_in_interval", 0)
-    state["machine_running"] = strokes > 0
-    state["last_cycle_time"] = payload["data"].get("last_cycle_time_seconds", 0.0)
-    
-    state_file = Path(".edge_state.json")
-    try:
-        with open(state_file, 'w') as f:
-            json.dump(state, f)
-    except Exception as e:
-        print(f"Failed to write edge state: {e}")
-
+    update_edge_state({
+        "machine_running": strokes > 0,
+        "last_cycle_time": payload["data"].get("last_cycle_time_seconds", 0.0),
+    })
 
 current_counter = 1500000
 operating_hours = 8000

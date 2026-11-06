@@ -45,28 +45,21 @@ current_load_wander = 0.0
 next_anomaly_time = 0.0
 anomaly_active_until = 0.0
 
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
+
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
+
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
+
 def _read_edge_state() -> dict:
-    state_file = Path(".edge_state.json")
-    if state_file.exists():
-        try:
-            with open(state_file, 'r') as f:
-                return json.load(f)
-        except:
-            pass
-    return {}
+    return get_edge_state()
 
 def _write_edge_state(payload: dict, is_anomaly: bool):
-    state = _read_edge_state()
-    state["machine_running"] = True
-    state["current_a_avg"] = payload["data"].get("current_a_avg", 120.0)
-    state["grid_voltage_sag"] = is_anomaly
-    
-    state_file = Path(".edge_state.json")
-    try:
-        with open(state_file, 'w') as f:
-            json.dump(state, f)
-    except Exception as e:
-        print(f"Failed to write edge state: {e}")
+    update_edge_state({
+        "machine_running": True,
+        "current_a_avg": payload["data"].get("current_a_avg", 120.0),
+        "grid_voltage_sag": is_anomaly,
+    })
 
 def get_poisson_anomaly():
     """Uses a Poisson process to trigger anomalies randomly, not repetitively."""
@@ -100,10 +93,15 @@ def generate_reading() -> dict:
     # If the thermal heater is running at 100% duty, it draws 25A (UNLESS heater is burnt out).
     compressor_load = edge_state.get("compressor_running", 0) * 40.0
     
+    duty = edge_state.get("thermal_duty_cycle", 0.0)
+    if duty > 1.0:
+        duty = duty / 100.0
+    duty = max(0.0, min(1.0, float(duty)))
+
     if edge_state.get("heater_failed", False):
         thermal_load = 0.0  # Zero electrical draw if heater element is burnt out
     else:
-        thermal_load = edge_state.get("thermal_duty_cycle", 0.0) * 25.0
+        thermal_load = duty * 25.0
     
     # Base physics loads (if upstream bots aren't running, assume defaults)
     base_machine_load = 120.0 + compressor_load + thermal_load

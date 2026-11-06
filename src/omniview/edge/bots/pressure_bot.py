@@ -38,29 +38,21 @@ def raw_to_bar(raw_value: int) -> float:
 def bar_to_raw(pressure_bar: float) -> int:
     return int((pressure_bar / 40.0) * 16383)
 
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
+
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
+
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
+
 def _read_edge_state() -> dict:
-    state_file = Path(".edge_state.json")
-    if state_file.exists():
-        try:
-            with open(state_file, 'r') as f:
-                return json.load(f)
-        except:
-            pass
-    return {}
+    return get_edge_state()
 
 def _write_edge_state(payload: dict):
-    state = _read_edge_state()
-    # Write compressor state for Electrical bot and Vibration bot
     comp_state = payload["data"].get("compressor_state", "OFF")
-    state["compressor_running"] = 1 if comp_state == "LOADED" else 0
-    state["pneumatic_pressure"] = payload["data"].get("pressure_bar", 33.0)
-    
-    state_file = Path(".edge_state.json")
-    try:
-        with open(state_file, 'w') as f:
-            json.dump(state, f)
-    except Exception as e:
-        print(f"Failed to write edge state: {e}")
+    update_edge_state({
+        "compressor_running": 1 if comp_state == "LOADED" else 0,
+        "pneumatic_pressure": payload["data"].get("pressure_bar", 33.0),
+    })
 
 # Live State
 current_pressure = 38.0
