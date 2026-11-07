@@ -433,4 +433,6 @@ __all__ = [
     "CoolingMalfunctionEvent",
     "CoolingMalfunctionDetector",
     "evaluate_cooling_malfunction",
+    "get_cooling_thresholds",
+    "load_cooling_calibration",
 ]

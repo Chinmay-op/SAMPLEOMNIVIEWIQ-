@@ -76,6 +76,8 @@ from omniview.rules.cooling_malfunction import (
     CoolingMalfunctionDetector,
     CoolingMalfunctionEvent,
     evaluate_cooling_malfunction,
+    get_cooling_thresholds,
+    load_cooling_calibration,
 )
 from omniview.rules.predictive_maintenance import (
     run_stage_a_pipeline,
@@ -141,4 +143,6 @@ __all__ = [
     "CoolingMalfunctionDetector",
     "CoolingMalfunctionEvent",
     "evaluate_cooling_malfunction",
+    "get_cooling_thresholds",
+    "load_cooling_calibration",
 ]
