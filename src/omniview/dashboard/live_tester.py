@@ -544,7 +544,7 @@ if not df2.empty:
 
     apply_dataviz_layout(
         fig2,
-        title="Cooling Malfunction Correlation: Dual Subplots (Power & Temperature)",
+        title="",
         height=450,
         yaxis_title="",
     )

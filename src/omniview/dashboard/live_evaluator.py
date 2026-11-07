@@ -54,7 +54,12 @@ from omniview.rules.vibration_zone import VibrationZoneDetector, classify_zone
 logger = logging.getLogger(__name__)
 
 
-def query_tsdb_series(sensor_type: str, limit: int = 200, lookback_minutes: int | None = None) -> list[dict[str, Any]]:
+def query_tsdb_series(
+    sensor_type: str,
+    limit: int = 200,
+    lookback_minutes: int | None = None,
+    device_id: str | list[str] | None = None,
+) -> list[dict[str, Any]]:
     """Query TimescaleDB for raw readings ordered chronologically (oldest to newest)."""
     table = f"readings_{sensor_type}"
     engine = get_engine()
@@ -62,25 +67,38 @@ def query_tsdb_series(sensor_type: str, limit: int = 200, lookback_minutes: int 
 
     try:
         with engine.connect() as conn:
+            device_clause = ""
+            params: dict[str, Any] = {"limit": limit}
+
+            if device_id is not None:
+                if isinstance(device_id, (list, tuple, set)):
+                    device_clause = "AND device_id = ANY(:dev_ids)"
+                    params["dev_ids"] = list(device_id)
+                else:
+                    device_clause = "AND device_id = :dev_id"
+                    params["dev_id"] = device_id
+
             if lookback_minutes is not None:
                 cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
+                params["cutoff"] = cutoff
                 query = text(f"""
                     SELECT time, device_id, site_id, sensor_type, data
                     FROM {table}
-                    WHERE time >= :cutoff
+                    WHERE time >= :cutoff {device_clause}
                     ORDER BY time ASC
                     LIMIT :limit
                 """)
-                rows = conn.execute(query, {"cutoff": cutoff, "limit": limit}).fetchall()
+                rows = conn.execute(query, params).fetchall()
             else:
-                # Get the most recent N rows and sort chronologically
+                where_clause = f"WHERE 1=1 {device_clause}" if device_clause else ""
                 query = text(f"""
                     SELECT time, device_id, site_id, sensor_type, data
                     FROM {table}
+                    {where_clause}
                     ORDER BY time DESC
                     LIMIT :limit
                 """)
-                rows = conn.execute(query, {"limit": limit}).fetchall()
+                rows = conn.execute(query, params).fetchall()
                 rows = list(reversed(rows))
 
             for r in rows:
@@ -189,8 +207,18 @@ def evaluate_md_nearmiss(lookback_minutes: int | None = None, limit: int = 150) 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int = 150) -> dict[str, Any]:
-    elec_readings = query_tsdb_series("electrical", limit=limit, lookback_minutes=lookback_minutes)
-    therm_readings = query_tsdb_series("thermal", limit=limit, lookback_minutes=lookback_minutes)
+    elec_readings = query_tsdb_series(
+        "electrical",
+        limit=limit,
+        lookback_minutes=lookback_minutes,
+        device_id=["Selec-MFM384-01", "pune-isbm-mfm384", "isbm-01"],
+    )
+    therm_readings = query_tsdb_series(
+        "thermal",
+        limit=limit,
+        lookback_minutes=lookback_minutes,
+        device_id=["Omron-E5CC-01", "pune-isbm-therm01", "isbm-01"],
+    )
 
     detector = CoolingMalfunctionDetector()
     events = []
@@ -208,6 +236,7 @@ def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int
     latest_temp = None
     latest_time = None
     latest_breach = False
+    latest_thermal_state = "AT_SETPOINT"
 
     for t, stype, r in combined:
         adapted = adapt(r)
@@ -219,8 +248,14 @@ def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int
         kw = st.get("power_kw")
         temp = st.get("temp_c")
 
+        if stype == "thermal":
+            raw_data = r.get("data", {})
+            latest_thermal_state = raw_data.get("machine_thermal_state", "AT_SETPOINT")
+
         if kw is not None and temp is not None:
-            breach = (kw > COOLING_POWER_THRESHOLD_KW) and (temp < COOLING_TEMP_LOW_C)
+            is_warmup = (latest_thermal_state == "HEATING") and (temp < COOLING_TEMP_LOW_C)
+            breach = (kw > COOLING_POWER_THRESHOLD_KW) and (temp < COOLING_TEMP_LOW_C) and (not is_warmup)
+
             series.append({
                 "time": t,
                 "power_kw": kw,
