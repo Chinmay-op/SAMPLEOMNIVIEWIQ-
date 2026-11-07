@@ -58,3 +58,4 @@ def update_edge_state(updates: dict[str, Any]) -> None:
             tmp_file.replace(_STATE_FILE)
         except Exception as e:
             logger.debug("Failed to persist edge state: %s", e)
+

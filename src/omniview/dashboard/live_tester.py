@@ -52,6 +52,7 @@ from omniview.ingest.db import get_engine
 from omniview.rules.action_cards import ActionCardGenerator
 from omniview.dashboard.action_card_ui import render_action_card
 from omniview.rules.cooling_malfunction import evaluate_cooling_malfunction as eval_cooling_pure
+from omniview.edge.bots.edge_state import get_edge_state, update_edge_state
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
@@ -586,6 +587,26 @@ if not df2.empty:
                     st.json(evt_dict)
             else:
                 st.success(f"🟢 **NORMAL**: Power ({test_p:.1f} kW) or Temp ({test_t:.1f} °C) is outside breach condition.")
+
+            st.markdown("---")
+            st.markdown("**📡 Live Streaming Anomaly Injection (Inject Directly into Live TimescaleDB Stream):**")
+            cur_edge_st = get_edge_state()
+            live_fault_active = cur_edge_st.get("cooling_malfunction", False)
+
+            lb_c1, lb_c2 = st.columns(2)
+            with lb_c1:
+                if st.button("🚨 Inject Malfunction into Live Stream (Stuck Chiller Valve)", key="cm_live_fault"):
+                    update_edge_state({"cooling_malfunction": True})
+                    st.rerun()
+            with lb_c2:
+                if st.button("🟢 Restore Healthy Live Stream (PID Target 255 °C)", key="cm_live_norm"):
+                    update_edge_state({"cooling_malfunction": False})
+                    st.rerun()
+
+            if live_fault_active:
+                st.warning("⚠️ **Active Live Anomaly:** Bot is currently simulating stuck chiller valve (chilling barrel < 100 °C while drawing production power). Watch the live graph update!")
+            else:
+                st.caption("✅ **Live Bots Status:** Closed-loop PID controller operating normally at ~255 °C setpoint.")
 
     preview_cm_event = {
         "event_type": "cooling_malfunction",

@@ -70,9 +70,9 @@ class LiveBotsManager:
 
         # 2. Start bot loops
         bot_configs = [
-            ("electrical", "compressor-01", generate_electrical),
+            ("electrical", "isbm-01", generate_electrical),
             ("vibration", "compressor-01", generate_vibration),
-            ("thermal", "compressor-01", generate_thermal),
+            ("thermal", "isbm-01", generate_thermal),
             ("pressure", "compressor-01", generate_pressure),
             ("gas", "compressor-01", generate_gas),
             ("stroke", "isbm-01", generate_stroke),

@@ -59,6 +59,7 @@ current_pressure = 38.0
 pressure_min_memory = 38.0
 pressure_max_memory = 38.0
 compressor_active = False
+last_tick_time = 0.0
 
 next_anomaly_time = 0.0
 anomaly_active_until = 0.0
@@ -82,8 +83,16 @@ def get_poisson_anomaly():
     return False
 
 def generate_reading() -> dict:
-    global current_pressure, pressure_min_memory, pressure_max_memory, compressor_active
+    global current_pressure, pressure_min_memory, pressure_max_memory, compressor_active, last_tick_time
     wanderer.end_tick()
+
+    now_time = sim_clock.now()
+    if last_tick_time == 0.0:
+        dt_sec = 5.0
+    else:
+        dt_sec = max(0.1, min(60.0, now_time - last_tick_time))
+    last_tick_time = now_time
+    dt_min = dt_sec / 60.0
 
     edge_state = _read_edge_state()
     machine_running = edge_state.get("machine_running", True)
@@ -121,7 +130,8 @@ def generate_reading() -> dict:
     q_leak = c_l * current_pressure
     
     # Mass balance for the tick
-    dp = q_comp - q_cons - q_leak
+    dp_per_min = q_comp - q_cons - q_leak
+    dp = dp_per_min * dt_min
     current_pressure += dp
     
     # Add tiny mechanical flutter

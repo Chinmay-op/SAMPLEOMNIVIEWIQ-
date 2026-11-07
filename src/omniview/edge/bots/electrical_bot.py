@@ -91,7 +91,8 @@ def generate_reading() -> dict:
     edge_state = _read_edge_state()
     # E.g., if a pneumatic compressor is running, it draws 40A.
     # If the thermal heater is running at 100% duty, it draws 25A (UNLESS heater is burnt out).
-    compressor_load = edge_state.get("compressor_running", 0) * 40.0
+    include_compressor = edge_state.get("include_compressor_in_electrical", False)
+    compressor_load = (edge_state.get("compressor_running", 0) * 40.0) if include_compressor else 0.0
     
     duty = edge_state.get("thermal_duty_cycle", 0.0)
     if duty > 1.0:
@@ -268,7 +269,7 @@ def run_bot():
     if not HAS_JSONSCHEMA:
         print("Warning: 'jsonschema' package not installed. Strict payload validation is disabled.")
     
-    topic = build_topic("pune-isbm", "compressor-01", "electrical")
+    topic = build_topic("pune-isbm", "isbm-01", "electrical")
     
     with OmniViewMQTTClient() as client:
         while True:

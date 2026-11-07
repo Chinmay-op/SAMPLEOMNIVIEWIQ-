@@ -49,11 +49,11 @@ def _write_edge_state(payload: dict, is_anomaly: bool):
     })
 
 # --- Live Stochastic PID State ---
-current_pv = 25.0  # Cold start from ambient
+current_pv = 255.0  # Production steady-state at setpoint
 integral_error = 0.0
 prev_error = 0.0
 mv_saturation_streak = 0
-last_pv_15m = [250.0] * 15
+last_pv_15m = [255.0] * 15
 
 # Poisson Anomaly Timer
 next_anomaly_time = 0.0
@@ -90,7 +90,8 @@ def generate_reading() -> dict:
     sp = 255.0 # Setpoint
     error = False
 
-    is_anomaly = get_poisson_anomaly()
+    cooling_malfunction = edge_state.get("cooling_malfunction", False)
+    is_anomaly = get_poisson_anomaly() or cooling_malfunction
 
     # --- Live PID Controller Physics ---
     Kp = 4.0
@@ -125,7 +126,7 @@ def generate_reading() -> dict:
     mv = max(0.0, min(100.0, mv + wanderer.get('mv', 0.2, 1.0)))
     
     if is_anomaly:
-        # Heater burnout: no heating, only slow cooling toward ambient
+        # Heater burnout or cooling malfunction: no heating
         heat_pull = 0.0
     else:
         # The heater physically pulls the temperature toward the element's maximum theoretical temperature (~450°C)
@@ -134,7 +135,7 @@ def generate_reading() -> dict:
         heat_pull = heating_k * (mv / 100.0) * (max_heater_temp - current_pv) * dt
     
     # Ambient always pulls temperature toward room temp (exponential cooling)
-    cool_pull = cooling_k * (current_pv - ambient_temp) * dt
+    cool_pull = 0.003 * (current_pv - ambient_temp) * dt if cooling_malfunction else cooling_k * (current_pv - ambient_temp) * dt
     
     # Organic noise during steady state (simulates process disturbances)
     thermal_noise = wanderer.get('thermal_noise', 0.05, 0.3)
@@ -164,7 +165,9 @@ def generate_reading() -> dict:
         trend = "STABLE"
 
     # State classification
-    if is_anomaly:
+    if cooling_malfunction:
+        state_str = "COOLING"
+    elif is_anomaly:
         state_str = "HEATING" # Trying to heat, but failing
     elif current_pv < sp - 10:
         state_str = "HEATING"
@@ -216,7 +219,7 @@ def run_bot():
     print(f"Starting Thermal Live Stochastic Bot... (Polling {POLL_INTERVAL}s interval)")
     print("Mode: True Stochastic Live Generation (PID Loop + Poisson Anomalies + Shared State)")
     
-    topic = build_topic("pune-isbm", "compressor-01", "thermal")
+    topic = build_topic("pune-isbm", "isbm-01", "thermal")
     with OmniViewMQTTClient() as client:
         while True:
             payload = generate_reading()
