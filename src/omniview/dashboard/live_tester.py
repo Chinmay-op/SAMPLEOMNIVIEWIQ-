@@ -437,44 +437,119 @@ res2 = evaluate_cooling_malfunction(lookback_minutes=chosen_lookback)
 df2 = res2["df"]
 
 if not df2.empty:
-    fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+    # ── Live Physical Correlation KPI Strip ──────────────────────────────────
+    ls2 = res2.get("latest_state")
+    if ls2:
+        kpi1, kpi2, kpi3 = st.columns(3)
+        p_val = ls2.get("power_kw", 0.0)
+        t_val = ls2.get("temp_c", 0.0)
+        is_breach = ls2.get("breach", False)
+
+        with kpi1:
+            st.metric(
+                label="1. Electrical Active Power",
+                value=f"{p_val:.1f} kW",
+                delta="> 50 kW Gate (Machine Running)" if p_val > 50 else "< 50 kW (Machine Idle/Off)",
+                delta_color="normal" if p_val > 50 else "off",
+            )
+        with kpi2:
+            st.metric(
+                label="2. Barrel Temperature",
+                value=f"{t_val:.1f} °C",
+                delta="> 100 °C (Hot / Normal)" if t_val >= 100 else "< 100 °C (Cold Danger Zone)",
+                delta_color="normal" if t_val >= 100 else "inverse",
+            )
+        with kpi3:
+            if is_breach:
+                st.metric(
+                    label="3. Correlation Verdict",
+                    value="🚨 COOLING MALFUNCTION",
+                    delta="High Power + Cold Barrel",
+                    delta_color="inverse",
+                )
+            else:
+                st.metric(
+                    label="3. Correlation Verdict",
+                    value="🟢 NORMAL PRODUCTION",
+                    delta="Barrel hot at ~255°C setpoint",
+                    delta_color="normal",
+                )
+
+    # ── Stacked Synchronized Subplots (Datawrapper / Dataviz Best Practice) ──
+    fig2 = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.12,
+        subplot_titles=[
+            "<b>Electrical Active Power (kW)</b> — Prerequisite: > 50 kW confirms machine is in active production",
+            "<b>Barrel Temperature (°C)</b> — Normal production setpoint: 255 °C | Malfunction breach if drops < 100 °C",
+        ]
+    )
+
+    # Subplot 1: Active Power (kW)
     fig2.add_trace(
         go.Scatter(
             x=df2["time"], y=df2["power_kw"],
             name="Electrical Power (kW)",
             line={"color": PALETTE["blue"], "width": 2},
+            fill="tozeroy",
+            fillcolor="rgba(0, 114, 178, 0.07)",
         ),
-        secondary_y=False,
+        row=1, col=1
     )
+    fig2.add_hline(
+        y=50.0, line_dash="dash", line_color=PALETTE["muted_gray"],
+        annotation_text="<b>50 kW Running Prerequisite</b>", annotation_position="top left",
+        row=1, col=1
+    )
+
+    # Subplot 2: Barrel Temperature (°C)
     fig2.add_trace(
         go.Scatter(
             x=df2["time"], y=df2["temp_c"],
-            name="Barrel / Cooling Temp (°C)",
+            name="Barrel Temp (°C)",
             line={"color": PALETTE["orange"], "width": 2},
         ),
-        secondary_y=True,
+        row=2, col=1
     )
-    # Thresholds
-    fig2.add_hline(y=50.0, line_dash="dash", line_color=PALETTE["vermillion"], secondary_y=False,
-                   annotation_text="<b>50 kW Power Threshold</b>", annotation_position="top left")
-    fig2.add_hline(y=100.0, line_dash="dash", line_color=PALETTE["sky_blue"], secondary_y=True,
-                   annotation_text="<b>100 °C Low Temp Threshold</b>", annotation_position="bottom right")
+    fig2.add_hline(
+        y=255.0, line_dash="dot", line_color=PALETTE["green"],
+        annotation_text="<b>255 °C Normal Setpoint</b>", annotation_position="top left",
+        row=2, col=1
+    )
+    fig2.add_hline(
+        y=100.0, line_dash="dash", line_color=PALETTE["vermillion"],
+        annotation_text="<b>100 °C Malfunction Threshold</b>", annotation_position="bottom left",
+        row=2, col=1
+    )
+    fig2.add_hrect(
+        y0=0, y1=100.0,
+        fillcolor="rgba(213, 94, 0, 0.12)", line_width=0,
+        annotation_text="Cold Failure Zone (<100°C)", annotation_position="bottom right",
+        row=2, col=1
+    )
 
-    # Shaded breach regions
+    # Mark any breaches on Subplot 1
     breach_pts = df2[df2["breach"]]
     if not breach_pts.empty:
         fig2.add_trace(
             go.Scatter(
                 x=breach_pts["time"], y=breach_pts["power_kw"],
                 mode="markers",
-                marker={"size": 10, "color": PALETTE["vermillion"], "symbol": "circle"},
-                name="Thermal/Energy Mismatch Breach",
+                marker={"size": 8, "color": PALETTE["vermillion"], "symbol": "circle"},
+                name="Thermal/Energy Mismatch",
             ),
-            secondary_y=False,
+            row=1, col=1
         )
 
-    apply_dataviz_layout(fig2, "Cooling Malfunction: High Power (>50kW) alongside Cold Temp (<100°C)", yaxis_title="Active Power (kW)")
-    fig2.update_yaxes(title_text="Temperature (°C)", secondary_y=True, showgrid=False)
+    apply_dataviz_layout(
+        fig2,
+        title="Cooling Malfunction Correlation: Dual Subplots (Power & Temperature)",
+        height=450,
+        yaxis_title="",
+    )
+    fig2.update_yaxes(title_text="Power (kW)", row=1, col=1)
+    fig2.update_yaxes(title_text="Temp (°C)", row=2, col=1)
     st.plotly_chart(fig2, use_container_width=True)
 
     # Interactive anomaly tester for Cooling Malfunction
@@ -483,11 +558,22 @@ if not df2.empty:
             st.markdown(
                 "Test how `CoolingMalfunctionDetector` and `ActionCardGenerator` react when you simulate a thermal/energy mismatch:"
             )
+            # Preset one-click buttons
+            b_col1, b_col2 = st.columns(2)
+            with b_col1:
+                if st.button("🟢 Preset: Normal Run (95 kW, 255 °C)", key="cm_btn_norm"):
+                    st.session_state["cm_test_p"] = 95.0
+                    st.session_state["cm_test_t"] = 255.0
+            with b_col2:
+                if st.button("🚨 Preset: Simulate Stuck Chiller Valve (85 kW, 42 °C)", key="cm_btn_fault"):
+                    st.session_state["cm_test_p"] = 85.0
+                    st.session_state["cm_test_t"] = 42.0
+
             tc1, tc2 = st.columns(2)
             with tc1:
-                test_p = st.slider("Simulated Active Power (kW)", min_value=10.0, max_value=120.0, value=68.5, step=1.0, key="cm_test_p")
+                test_p = st.slider("Simulated Active Power (kW)", min_value=10.0, max_value=120.0, value=float(st.session_state.get("cm_test_p", 85.0)), step=1.0, key="cm_test_p")
             with tc2:
-                test_t = st.slider("Simulated Barrel / Coolant Temp (°C)", min_value=15.0, max_value=260.0, value=42.0, step=1.0, key="cm_test_t")
+                test_t = st.slider("Simulated Barrel / Coolant Temp (°C)", min_value=15.0, max_value=260.0, value=float(st.session_state.get("cm_test_t", 42.0)), step=1.0, key="cm_test_t")
 
             sim_evt = eval_cooling_pure(test_p, test_t, device_id="isbm-01")
             if sim_evt:
