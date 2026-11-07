@@ -40,7 +40,7 @@ from omniview.ingest.db import get_engine
 from omniview.predictive.batch_runner import HealthIndexPipeline
 from omniview.predictive.maintenance_log import MaintenanceLogger, MaintenanceEvent
 from omniview.rules.ambient_correlation import AmbientCorrelationRule
-from omniview.rules.cooling_malfunction import CoolingMalfunctionDetector
+from omniview.rules.cooling_malfunction import CoolingMalfunctionDetector, get_cooling_thresholds, load_cooling_calibration
 from omniview.rules.demand_window import DemandWindowDetector
 from omniview.rules.gas_model import EnhancedGasOverheatDetector
 from omniview.rules.lazy_idle import LazyIdleDetector
@@ -220,7 +220,9 @@ def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int
         device_id=["Omron-E5CC-01", "pune-isbm-therm01", "isbm-01"],
     )
 
-    detector = CoolingMalfunctionDetector()
+    cal_p, cal_t, is_ph = get_cooling_thresholds()
+    cal_manifest = load_cooling_calibration()
+    detector = CoolingMalfunctionDetector(power_threshold_kw=cal_p, temp_threshold_c=cal_t)
     events = []
     series = []
 
@@ -253,16 +255,16 @@ def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int
             latest_thermal_state = raw_data.get("machine_thermal_state", "AT_SETPOINT")
 
         if kw is not None and temp is not None:
-            is_warmup = (latest_thermal_state == "HEATING") and (temp < COOLING_TEMP_LOW_C)
-            breach = (kw > COOLING_POWER_THRESHOLD_KW) and (temp < COOLING_TEMP_LOW_C) and (not is_warmup)
+            is_warmup = (latest_thermal_state == "HEATING") and (temp < cal_t)
+            breach = (kw > cal_p) and (temp < cal_t) and (not is_warmup)
 
             series.append({
                 "time": t,
                 "power_kw": kw,
                 "temp_c": temp,
                 "breach": breach,
-                "power_threshold": COOLING_POWER_THRESHOLD_KW,
-                "temp_threshold": COOLING_TEMP_LOW_C,
+                "power_threshold": cal_p,
+                "temp_threshold": cal_t,
             })
             latest_kw = kw
             latest_temp = temp
@@ -289,8 +291,10 @@ def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int
     return {
         "df": df,
         "events": events,
-        "power_threshold": COOLING_POWER_THRESHOLD_KW,
-        "temp_threshold": COOLING_TEMP_LOW_C,
+        "power_threshold": cal_p,
+        "temp_threshold": cal_t,
+        "is_calibrated": not is_ph,
+        "calibration": cal_manifest,
         "latest_state": {
             "power_kw": latest_kw,
             "temp_c": latest_temp,

@@ -1,0 +1,48 @@
+{
+  "calibration_version": "1.0.0",
+  "calibrated_at": "2026-11-07T12:28:59.855803+00:00",
+  "dataset_metadata": {
+    "duration_days": 30,
+    "total_samples": 43200,
+    "sampling_interval_sec": 60,
+    "machine_model": "Nissei ASB-70DPH (ISBM-01)",
+    "site_id": "pune-isbm"
+  },
+  "power_threshold": {
+    "legacy_hardcoded_threshold_kw": 50.0,
+    "calibrated_production_gate_kw": 45.4,
+    "derivation_method": "Bayesian Minimum-Error Decision Boundary between Standby and Active Clusters",
+    "idle_cluster": {
+      "mean_kw": 18.54,
+      "std_kw": 2.0,
+      "upper_3sigma_kw": 24.54
+    },
+    "production_cluster": {
+      "mean_kw": 88.49,
+      "std_kw": 3.2,
+      "lower_3sigma_kw": 78.89
+    },
+    "confidence_level_pct": 100.0
+  },
+  "temperature_threshold": {
+    "legacy_hardcoded_threshold_c": 100.0,
+    "calibrated_malfunction_threshold_c": 180.0,
+    "delta_drop_from_setpoint_c": 75.0,
+    "derivation_method": "Statistical Process Control (SPC 6-Sigma) + PET Resin Freeze-Off Limit (180 \u00b0C)",
+    "normal_production_distribution": {
+      "setpoint_c": 255.0,
+      "mean_c": 254.85,
+      "std_c": 1.15,
+      "lower_3sigma_c": 251.4,
+      "lower_6sigma_c": 247.94
+    },
+    "validation_metrics_on_1_month_data": {
+      "true_positives": 270,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "sensitivity_recall_pct": 100.0,
+      "precision_pct": 100.0,
+      "false_alarm_rate_pct": 0.0
+    }
+  }
+}

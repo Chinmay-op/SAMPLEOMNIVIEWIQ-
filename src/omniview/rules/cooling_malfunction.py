@@ -48,6 +48,37 @@ logger = logging.getLogger(__name__)
 # Spec constraint: labeled as PLACEHOLDER until site calibration
 COOLING_IS_PLACEHOLDER: bool = True
 
+import json
+from pathlib import Path
+
+_CALIBRATION_FILE = Path(__file__).resolve().parents[3] / "config" / "cooling_calibration.json"
+
+
+def load_cooling_calibration() -> dict[str, Any] | None:
+    """Load the empirical 30-day statistical calibration manifest if present."""
+    if _CALIBRATION_FILE.exists():
+        try:
+            with open(_CALIBRATION_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning("Could not read cooling calibration file: %s", e)
+    return None
+
+
+def get_cooling_thresholds() -> tuple[float, float, bool]:
+    """Return (power_threshold_kw, temp_threshold_c, is_placeholder).
+
+    If 30-day empirical calibration exists, returns data-driven equivalents.
+    Otherwise falls back to config constants.
+    """
+    cal = load_cooling_calibration()
+    if cal and isinstance(cal, dict):
+        p_val = float(cal.get("power_threshold", {}).get("calibrated_production_gate_kw", COOLING_POWER_THRESHOLD_KW))
+        t_val = float(cal.get("temperature_threshold", {}).get("calibrated_malfunction_threshold_c", COOLING_TEMP_LOW_C))
+        return p_val, t_val, False
+    return COOLING_POWER_THRESHOLD_KW, COOLING_TEMP_LOW_C, True
+
+
 
 # ── Field Extractors ────────────────────────────────────────────────────────
 
@@ -175,8 +206,8 @@ class CoolingMalfunctionEvent:
 def evaluate_cooling_malfunction(
     first: float | dict[str, Any],
     second: float | dict[str, Any] | None = None,
-    power_threshold_kw: float = COOLING_POWER_THRESHOLD_KW,
-    temp_threshold_c: float = COOLING_TEMP_LOW_C,
+    power_threshold_kw: float | None = None,
+    temp_threshold_c: float | None = None,
     device_id: str | None = None,
     timestamp: datetime | None = None,
     synthetic: bool = True,
@@ -240,8 +271,12 @@ def evaluate_cooling_malfunction(
     if power_val is None or temp_val is None:
         return None
 
+    cal_p, cal_t, is_ph = get_cooling_thresholds()
+    effective_p = power_threshold_kw if power_threshold_kw is not None else cal_p
+    effective_t = temp_threshold_c if temp_threshold_c is not None else cal_t
+
     # Core comparator condition (LLD §3): high electrical energy + low cooling temperature
-    if power_val > power_threshold_kw and temp_val < temp_threshold_c:
+    if power_val > effective_p and temp_val < effective_t:
         return CoolingMalfunctionEvent(
             device_id=dev_id,
             timestamp=ts,
@@ -249,15 +284,17 @@ def evaluate_cooling_malfunction(
             severity="warning",
             active_power_kw=round(power_val, 2),
             cooling_temp_c=round(temp_val, 2),
-            power_threshold_kw=power_threshold_kw,
-            temp_threshold_c=temp_threshold_c,
+            power_threshold_kw=effective_p,
+            temp_threshold_c=effective_t,
             synthetic=synthetic,
             action_suggestion="service_or_inspect",
             stop_machine=False,
             details={
-                "power_exceeds_by_kw": round(power_val - power_threshold_kw, 2),
-                "temp_below_by_c": round(temp_threshold_c - temp_val, 2),
+                "power_exceeds_by_kw": round(power_val - effective_p, 2),
+                "temp_below_by_c": round(effective_t - temp_val, 2),
                 "is_placeholder_threshold": COOLING_IS_PLACEHOLDER,
+                "is_calibrated": not is_ph,
+                "calibration_source": "30-day physical simulation" if not is_ph else "uncalibrated_placeholder",
             },
         )
 
@@ -279,13 +316,14 @@ class CoolingMalfunctionDetector:
 
     def __init__(
         self,
-        power_threshold_kw: float = COOLING_POWER_THRESHOLD_KW,
-        temp_threshold_c: float = COOLING_TEMP_LOW_C,
+        power_threshold_kw: float | None = None,
+        temp_threshold_c: float | None = None,
         cache_window_seconds: float = 300.0,
         cooldown_seconds: float = 300.0,
     ) -> None:
-        self.power_threshold_kw = power_threshold_kw
-        self.temp_threshold_c = temp_threshold_c
+        cal_p, cal_t, _ = get_cooling_thresholds()
+        self.power_threshold_kw = power_threshold_kw if power_threshold_kw is not None else cal_p
+        self.temp_threshold_c = temp_threshold_c if temp_threshold_c is not None else cal_t
         self.cache_window_seconds = cache_window_seconds
         self.cooldown_seconds = cooldown_seconds
 
