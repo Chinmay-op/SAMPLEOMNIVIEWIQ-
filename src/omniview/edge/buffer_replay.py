@@ -95,6 +95,23 @@ def _extract_sensor_type(topic: str) -> str:
     return "unknown"
 
 
+def _parse_ts(ts: Any) -> float:
+    """Safely convert a timestamp (epoch float or ISO string) to epoch seconds."""
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    if isinstance(ts, str):
+        try:
+            return float(ts)
+        except ValueError:
+            pass
+        try:
+            from datetime import datetime
+            return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return time.time()
+    return time.time()
+
+
 def timestamp_sorted_merge(
     messages: list[BufferedMessage],
 ) -> list[BufferedMessage]:
@@ -114,7 +131,7 @@ def timestamp_sorted_merge(
     list[BufferedMessage]
         Messages ordered by ``timestamp`` ascending.
     """
-    return sorted(messages, key=lambda m: m.timestamp)
+    return sorted(messages, key=lambda m: _parse_ts(m.timestamp))
 
 
 def group_by_sensor_type(
@@ -257,8 +274,8 @@ class BufferReplayEngine:
 
             # Track replay window
             if sorted_batch:
-                batch_start = sorted_batch[0].timestamp
-                batch_end = sorted_batch[-1].timestamp
+                batch_start = _parse_ts(sorted_batch[0].timestamp)
+                batch_end = _parse_ts(sorted_batch[-1].timestamp)
                 if result.replay_window_start == 0.0:
                     result.replay_window_start = batch_start
                 result.replay_window_end = max(
