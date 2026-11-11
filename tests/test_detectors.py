@@ -356,6 +356,16 @@ class TestVibrationZoneDetector:
         result3 = det.evaluate(self._make_sample(10.0, ts3))  # Zone C again
         assert result3 is not None
 
+    def test_evaluate_vibration_zone_function(self):
+        """Test the standalone evaluate_vibration_zone function per LLD Section 3."""
+        from omniview.rules.vibration_zone import evaluate_vibration_zone
+        ts = datetime(2026, 9, 15, 10, 0, 0, tzinfo=IST)
+        assert evaluate_vibration_zone(self._make_sample(1.5, ts)) is None
+        event = evaluate_vibration_zone(self._make_sample(10.0, ts))
+        assert event is not None
+        assert event.zone == "C"
+        assert event.severity == "alert"
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Detectors Live Runner

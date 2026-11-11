@@ -228,3 +228,42 @@ class VibrationZoneDetector:
         if isinstance(ts_raw, (int, float)):
             return datetime.fromtimestamp(ts_raw, tz=timezone.utc)
         return datetime.now(timezone.utc)
+
+
+def evaluate_vibration_zone(
+    sample: dict[str, Any],
+    detector: VibrationZoneDetector | None = None,
+) -> VibrationZoneEvent | None:
+    """Evaluate a single vibration reading for ISO 10816-3 zone transition/breach.
+
+    Adheres to LLD Section 3:
+    'Vibration pattern | src/omniview/rules/vibration_zone.py | evaluate_vibration_zone'
+
+    Parameters
+    ----------
+    sample : dict[str, Any]
+        Payload containing device_id, timestamp, and rms_velocity_mms
+        (or z_axis_rms_velocity_mm_sec).
+    detector : VibrationZoneDetector, optional
+        Optional stateful detector instance for tracking device zone transitions.
+
+    Returns
+    -------
+    VibrationZoneEvent | None
+        Event if the machine is in Zone C/D or has undergone an alerted transition.
+    """
+    if detector is not None:
+        return detector.evaluate(sample)
+
+    det = VibrationZoneDetector(emit_on_cd_only=True)
+    return det.evaluate(sample)
+
+
+__all__ = [
+    "ZONE_TABLE",
+    "classify_zone",
+    "VibrationZoneEvent",
+    "VibrationZoneDetector",
+    "evaluate_vibration_zone",
+]
+

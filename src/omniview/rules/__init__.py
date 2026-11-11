@@ -61,6 +61,7 @@ from omniview.rules.vibration_zone import (
     VibrationZoneDetector,
     VibrationZoneEvent,
     classify_zone,
+    evaluate_vibration_zone,
 )
 from omniview.rules.detectors_live import (
     DetectorsLiveRunner,
@@ -123,6 +124,7 @@ __all__ = [
     "VibrationZoneDetector",
     "VibrationZoneEvent",
     "classify_zone",
+    "evaluate_vibration_zone",
     # Live Runner
     "DetectorsLiveRunner",
     "DetectorEntry",
