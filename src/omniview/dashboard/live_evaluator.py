@@ -127,7 +127,12 @@ def query_tsdb_series(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def evaluate_md_nearmiss(lookback_minutes: int | None = None, limit: int = 150) -> dict[str, Any]:
-    raw_readings = query_tsdb_series("electrical", limit=limit, lookback_minutes=lookback_minutes)
+    raw_readings = query_tsdb_series(
+        "electrical",
+        limit=limit,
+        lookback_minutes=lookback_minutes,
+        device_id=["Selec-MFM384-01", "pune-isbm-mfm384", "isbm-01"],
+    )
     detector = DemandWindowDetector()
 
     series = []
@@ -168,7 +173,7 @@ def evaluate_md_nearmiss(lookback_minutes: int | None = None, limit: int = 150) 
                 "severity": event.severity,
                 "raw_event": event.to_dict() if hasattr(event, "to_dict") else {
                     "event_type": "md_risk",
-                    "device_id": getattr(event, "device_id", "pune-comp-mfm384"),
+                    "device_id": getattr(event, "device_id", "isbm-01"),
                     "kva": kva,
                     "projected_demand_kva": event.projected_demand_kva,
                     "timestamp": r["time"].isoformat() if hasattr(r["time"], "isoformat") else str(r["time"]),
@@ -309,8 +314,18 @@ def evaluate_cooling_malfunction(lookback_minutes: int | None = None, limit: int
 # ─────────────────────────────────────────────────────────────────────────────
 
 def evaluate_lazy_idle(lookback_minutes: int | None = None, limit: int = 150) -> dict[str, Any]:
-    elec_readings = query_tsdb_series("electrical", limit=limit, lookback_minutes=lookback_minutes)
-    therm_readings = query_tsdb_series("thermal", limit=limit, lookback_minutes=lookback_minutes)
+    elec_readings = query_tsdb_series(
+        "electrical",
+        limit=limit,
+        lookback_minutes=lookback_minutes,
+        device_id=["Selec-MFM384-01", "pune-isbm-mfm384", "isbm-01"],
+    )
+    therm_readings = query_tsdb_series(
+        "thermal",
+        limit=limit,
+        lookback_minutes=lookback_minutes,
+        device_id=["Omron-E5CC-01", "pune-isbm-therm01", "isbm-01"],
+    )
 
     detector = LazyIdleDetector()
     events = []
@@ -337,7 +352,7 @@ def evaluate_lazy_idle(lookback_minutes: int | None = None, limit: int = 150) ->
         if cur_current is not None and cur_temp is not None:
             # Joined sample passed to LazyIdleDetector
             joined_sample = {
-                "device_id": sample.get("device_id", "compressor-01"),
+                "device_id": sample.get("device_id", "isbm-01"),
                 "timestamp": t.isoformat() if hasattr(t, "isoformat") else str(t),
                 "data": {
                     "current_a": cur_current,
@@ -764,3 +779,44 @@ def evaluate_ambient_correlation(lookback_minutes: int | None = None, limit: int
         "events": events,
         "sigma_threshold": 2.0,
     }
+
+
+def get_latest_equipment_telemetry() -> dict[str, dict[str, Any]]:
+    """Return the most recent reading for each sensor, grouped by equipment node."""
+    engine = get_engine()
+    sensor_map = {
+        "isbm-01": ["thermal", "electrical", "stroke"],
+        "compressor-01": ["pressure", "vibration", "gas"],
+        "floor": ["ambient"],
+    }
+    result: dict[str, dict[str, Any]] = {"isbm-01": {}, "compressor-01": {}, "floor": {}}
+
+    try:
+        with engine.connect() as conn:
+            for node, sensors in sensor_map.items():
+                for s in sensors:
+                    row = conn.execute(text(f"""
+                        SELECT time, device_id, site_id, data
+                        FROM readings_{s}
+                        ORDER BY time DESC
+                        LIMIT 1
+                    """)).fetchone()
+                    if row:
+                        val = row[3]
+                        if isinstance(val, str):
+                            try:
+                                val = json.loads(val)
+                            except Exception:
+                                pass
+                        age_s = (datetime.now(timezone.utc) - row[0]).total_seconds()
+                        result[node][s] = {
+                            "time": row[0],
+                            "age_seconds": round(age_s, 1),
+                            "device_id": row[1],
+                            "site_id": row[2],
+                            "data": val if isinstance(val, dict) else {},
+                        }
+    except Exception as e:
+        logger.warning("Error fetching equipment telemetry: %s", e)
+
+    return result

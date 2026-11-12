@@ -44,6 +44,7 @@ from omniview.dashboard.live_evaluator import (
     evaluate_md_nearmiss,
     evaluate_pressure_leak,
     evaluate_vibration_zone,
+    get_latest_equipment_telemetry,
 )
 from omniview.dashboard.status_inspector import evaluate_all_functions
 from omniview.edge.bots.runner import get_live_bots_manager
@@ -186,11 +187,24 @@ with st.sidebar:
     st.markdown("### 🤖 Sensor Bots & Ingest")
     bot_mgr = get_live_bots_manager()
     counts = bot_mgr.get_counts()
-    is_running = any(counts.values())
+    in_process_running = any(counts.values())
 
-    if is_running:
-        st.success(f"🟢 Bots Running ({sum(counts.values())} msgs sent)")
-        if st.button("⏹️ Stop Live Bots"):
+    # Also check if background/daemon bots are actively streaming to TSDB
+    sidebar_telemetry = get_latest_equipment_telemetry()
+    all_ages = [
+        s_info.get("age_seconds", 999)
+        for node_info in sidebar_telemetry.values()
+        for s_info in node_info.values()
+        if isinstance(s_info, dict)
+    ]
+    min_telemetry_age = min(all_ages) if all_ages else 999.0
+    daemon_running = min_telemetry_age < 30.0
+
+    if in_process_running or daemon_running:
+        msg_str = f"{sum(counts.values())} in-process msgs" if in_process_running else f"Live (latest: {min_telemetry_age:.1f}s ago)"
+        st.success(f"🟢 Bots Running ({msg_str})")
+        st.caption("Mapped Nodes: `isbm-01` (3), `compressor-01` (3), `floor` (1)")
+        if in_process_running and st.button("⏹️ Stop In-Process Bots"):
             bot_mgr.stop()
             st.rerun()
     else:
@@ -233,6 +247,108 @@ try:
 except Exception as e:
     st.warning(f"Could not connect to TimescaleDB: {e}")
 
+
+# ── Factory Equipment & Mapped Sensor Bots (Live Telemetry Grid) ─────────────
+st.markdown("### 🏭 Factory Equipment & Live Mapped Sensor Telemetry")
+st.caption("Live streaming from 7 sensor bots routed to their mapped factory equipment assets:")
+
+eq_telemetry = get_latest_equipment_telemetry()
+col_isbm, col_comp, col_floor = st.columns(3)
+
+with col_isbm:
+    st.markdown("#### 🏭 ISBM-01 (Nissei ASB-70DPH)")
+    st.caption("Location: Production Floor | Machine ID: `isbm-01`")
+
+    isbm_therm = eq_telemetry.get("isbm-01", {}).get("thermal", {})
+    t_data = isbm_therm.get("data", {})
+    pv = t_data.get("present_value_pv_c")
+    sp = t_data.get("set_point_sp_c", 255.0)
+    t_state = t_data.get("machine_thermal_state", "AT_SETPOINT")
+    t_age = isbm_therm.get("age_seconds", "N/A")
+    st.metric(
+        "🌡️ Barrel Thermal (Omron-E5CC-01)",
+        f"{pv:.1f} °C" if isinstance(pv, (int, float)) else "N/A",
+        f"SP: {sp:.1f} °C | {t_state} ({t_age}s ago)",
+    )
+
+    isbm_elec = eq_telemetry.get("isbm-01", {}).get("electrical", {})
+    e_data = isbm_elec.get("data", {})
+    kw = e_data.get("active_power_kw_total")
+    v = e_data.get("voltage_v_ll_avg")
+    a = e_data.get("current_a_avg")
+    e_age = isbm_elec.get("age_seconds", "N/A")
+    st.metric(
+        "⚡ Main Motor Power (Selec-MFM384-01)",
+        f"{kw:.1f} kW" if isinstance(kw, (int, float)) else "N/A",
+        f"{v:.0f} V | {a:.1f} A ({e_age}s ago)",
+    )
+
+    isbm_stroke = eq_telemetry.get("isbm-01", {}).get("stroke", {})
+    s_data = isbm_stroke.get("data", {})
+    cycles = s_data.get("counter_value")
+    c_time = s_data.get("last_cycle_time_seconds")
+    s_age = isbm_stroke.get("age_seconds", "N/A")
+    st.metric(
+        "🔄 Ejection Stroke (Sick-IME-01)",
+        f"{cycles:,}" if isinstance(cycles, (int, float)) else "N/A",
+        f"Cycle: {c_time:.1f}s ({s_age}s ago)",
+    )
+
+with col_comp:
+    st.markdown("#### ⚙️ Compressor-01 (High-Pressure)")
+    st.caption("Location: Compressor Room | Machine ID: `compressor-01`")
+
+    comp_press = eq_telemetry.get("compressor-01", {}).get("pressure", {})
+    p_data = comp_press.get("data", {})
+    bar = p_data.get("pressure_bar")
+    c_state = p_data.get("compressor_state", "OFF")
+    p_age = comp_press.get("age_seconds", "N/A")
+    st.metric(
+        "🔵 Air Pressure (Festo-SPAU-01)",
+        f"{bar:.2f} bar" if isinstance(bar, (int, float)) else "N/A",
+        f"State: {c_state} ({p_age}s ago)",
+    )
+
+    comp_vib = eq_telemetry.get("compressor-01", {}).get("vibration", {})
+    v_data = comp_vib.get("data", {})
+    rms = v_data.get("z_axis_rms_velocity_mm_sec")
+    zone = v_data.get("iso_health_zone", "ZONE_A")
+    v_age = comp_vib.get("age_seconds", "N/A")
+    st.metric(
+        "📳 Bearing Vibration (Banner-QM30VT1-01)",
+        f"{rms:.2f} mm/s" if isinstance(rms, (int, float)) else "N/A",
+        f"ISO Zone: {zone} ({v_age}s ago)",
+    )
+
+    comp_gas = eq_telemetry.get("compressor-01", {}).get("gas", {})
+    g_data = comp_gas.get("data", {})
+    ppm = g_data.get("gas_concentration_ppm")
+    panel_t = g_data.get("internal_panel_temp_c")
+    severity = g_data.get("alert_severity_level", "NORMAL")
+    g_age = comp_gas.get("age_seconds", "N/A")
+    st.metric(
+        "💨 Enclosure Heat & Gas (Schneider-HeatTag)",
+        f"{ppm:.2f} ppm" if isinstance(ppm, (int, float)) else "N/A",
+        f"Panel: {panel_t:.1f} °C | {severity} ({g_age}s ago)",
+    )
+
+with col_floor:
+    st.markdown("#### 🌤️ Factory Floor Ambient")
+    st.caption("Location: Shop Floor Pillar | ID: `floor`")
+
+    floor_amb = eq_telemetry.get("floor", {}).get("ambient", {})
+    amb_data = floor_amb.get("data", {})
+    amb_t = amb_data.get("ambient_temp_c")
+    rh = amb_data.get("relative_humidity_pct")
+    dew = amb_data.get("dew_point_c")
+    amb_age = floor_amb.get("age_seconds", "N/A")
+    st.metric(
+        "🌤️ Ambient Climate (Schneider-TH110-01)",
+        f"{amb_t:.1f} °C" if isinstance(amb_t, (int, float)) else "N/A",
+        f"RH: {rh:.1f}% | Dew: {dew:.1f} °C ({amb_age}s ago)",
+    )
+
+st.markdown("---")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 3: Dynamic Implementation-Status Check
@@ -396,7 +512,7 @@ if not df1.empty:
     # Output Pipeline
     preview_md_event = {
         "event_type": "md_nearmiss",
-        "device_id": "pune-comp-mfm384",
+        "device_id": "isbm-01",
         "kva": 482.0,
         "projected_kva": 528.0,
         "contract_limit_kva": 500.0,
